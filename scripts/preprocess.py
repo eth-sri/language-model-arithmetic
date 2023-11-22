@@ -92,7 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--reproduction", action="store_true")
     args = parser.parse_args()
     
-    preprocess_alpaca("../data/datasets/alpaca_data.json", "../data/datasets/alpaca_processed2.csv")
-    preprocess_jigsaw("../data/datasets/all_data.csv", "../data/datasets/jigsaw_balanced_processed2.csv", reproduction=args.reproduction)
+    preprocess_alpaca("../data/datasets/alpaca_data.json", "../data/datasets/alpaca_processed.csv")
+    preprocess_jigsaw("../data/datasets/all_data.csv", "../data/datasets/jigsaw_balanced_processed.csv", reproduction=args.reproduction)
     preprocess_pol("../data/datasets/pol_062016-112019_labeled.ndjson", "../data/datasets/pol.csv")
     preprocess_IMDB("data/datasets/IMDB Dataset.csv", "data/datasets/IMDB_processed.csv")
