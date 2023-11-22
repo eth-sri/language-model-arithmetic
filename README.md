@@ -1,8 +1,10 @@
-# Model Arithmetic
+# Controlled Text Generation via Language Model Arithmetic
 
 This repo contains the code for model arithmetic, a comprehensive framework where arithmetic formulas express combinations of LMs and classifiers, thereby biasing the generated text towards or away from desired attributes.
 
-In order to install model arithmetic, run
+![Overview](overview.png)
+
+In order to install model arithmetic with Python 3, run
 
 ```sh
 python -m pip install -e .
