@@ -83,14 +83,14 @@ PERSPECTIVE_API_KEY="[YOUR API KEY]"
 OPENAI_API_KEY="[YOUR API KEY]"
 ```
 
-The processed datasets are already in the `data/datasets` folder. You can reproduce our results using these datasets using 
+The processed datasets are in the `data/datasets` folder. You can reproduce our results using these datasets by running 
 
 ```sh
 bash scripts/main.sh
 ```
-This will finetune a classifier for toxicity & sentiment, and reproduce the results from all sections of our paper. Results in CSV-format can then be found in the `eval/processed` and our figures in `eval/plots`.
+This will finetune a classifier for the toxicity and sentiment control tasks, and reproduce the results from all sections of our paper. Results in CSV-format can afterwards be found in `eval/processed` and our figures in `eval/plots`.
 
-Alternatively, you can download all datasets and put them in the `data/datasets` folder:
+Alternatively, you can download the raw datasets and put them in the `data/datasets` folder:
 - [Alpaca Data](https://github.com/tloen/alpaca-lora/blob/main/alpaca_data.json)
 - [Jigsaw Toxicity Dataset](https://www.kaggle.com/c/jigsaw-unintended-bias-in-toxicity-classification/data) (the `all_data.csv` file should be downloaded and extracted in the `data/datasets` folder)
 - [Politically Incorrect 4chan Messages](https://zenodo.org/record/3606810) (file should be unzipped and placed in the top level of the `data/datasets` folder)
