@@ -76,12 +76,6 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
-You also need to download all datasets and put them in the `data/datasets` folder:
-- [Alpaca Data](https://github.com/tloen/alpaca-lora/blob/main/alpaca_data.json)
-- [Jigsaw Toxicity Dataset](https://www.kaggle.com/c/jigsaw-unintended-bias-in-toxicity-classification/data) (the `all_data.csv` file should be downloaded and extracted in the `data/datasets` folder)
-- [Politically Incorrect 4chan Messages](https://zenodo.org/record/3606810) (file should be unzipped and placed in the top level of the `data/datasets` folder)
-- [IMDB Dataset](https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews)
-
 API Keys for both the [PERSPECTIVE API](https://perspectiveapi.com/) and [OpenAI](https://openai.com/) need to be available in the environment variables. Alternatively, they can be placed in the file `src/.env` as
 
 ```sh
@@ -89,17 +83,24 @@ PERSPECTIVE_API_KEY="[YOUR API KEY]"
 OPENAI_API_KEY="[YOUR API KEY]"
 ```
 
-Finally, you can reproduce the results using
+The processed datasets are already in the `data/datasets` folder. You can reproduce our results using these datasets using 
 
 ```sh
 bash scripts/main.sh
 ```
-This will preprocess the data, finetune a classifier for toxicity & sentiment, and reproduce the results from all sections of our paper. Results in CSV-format can then be found in the `eval/processed` and our figures in `eval/plots`.
+This will finetune a classifier for toxicity & sentiment, and reproduce the results from all sections of our paper. Results in CSV-format can then be found in the `eval/processed` and our figures in `eval/plots`.
 
-We note that part of our preprocessing code got lost, specifically for preparing the dataset that is used for finetuning the toxicity classifier. Running the code in this setting might therefore result in slightly different numbers when they involve the finetuned classifier. However, you can also adjust the `scripts/main.sh` such that the first line is
+Alternatively, you can download all datasets and put them in the `data/datasets` folder:
+- [Alpaca Data](https://github.com/tloen/alpaca-lora/blob/main/alpaca_data.json)
+- [Jigsaw Toxicity Dataset](https://www.kaggle.com/c/jigsaw-unintended-bias-in-toxicity-classification/data) (the `all_data.csv` file should be downloaded and extracted in the `data/datasets` folder)
+- [Politically Incorrect 4chan Messages](https://zenodo.org/record/3606810) (file should be unzipped and placed in the top level of the `data/datasets` folder)
+- [IMDB Dataset](https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews)
+
+
+You can then reproduce the results using
 
 ```sh
-python scripts/preprocess.py --reproduction
+bash scripts/main_preprocess.sh
 ```
 
-This provides a manual fix that selects the exact samples in the exact order we use. 
+We note that part of our preprocessing code got lost, specifically for preparing the dataset that is used for finetuning the toxicity classifier. Running the code without using the preprocessed datasets might therefore result in slightly different numbers when they involve the finetuned classifier.
