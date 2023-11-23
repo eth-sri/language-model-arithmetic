@@ -1,3 +1,4 @@
+python scripts/preprocess.py
 python scripts/finetune.py
 python scripts/evaluate_toxicity.py
 python scripts/evaluate_perspective.py
