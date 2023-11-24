@@ -779,7 +779,7 @@ class Classifier(RunnableOperator):
             model_output_probs = 1 - model_output_probs
             model_outputs_logprobs = torch.log(torch.max(model_output_probs, torch.tensor([1e-12], device=model_output_probs.device)))
         
-        output_logprobs = torch.zeros((len(tokenized_inputs.input_ids), 1, len(other_tokenizer)), device=output_formula[0].device)
+        output_logprobs = torch.zeros((len(tokenized_inputs.input_ids), 1, len(other_tokenizer)), device=model_outputs_logprobs.device)
         
         for i in range(len(tokenized_inputs.input_ids)):
             # change the topk tokens with factor * (model_token_output - model_no_token_output)
