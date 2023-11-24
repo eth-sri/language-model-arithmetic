@@ -1,5 +1,5 @@
 import torch
-from model_arithmetic import ModelArithmetic, Evaluation, LLMPrompt, enable_logging
+from model_arithmetic import ModelArithmetic, Evaluation, PromptedLLM, enable_logging
 from transformers import set_seed
 import pandas as pd
 from formulas_toxicity import *

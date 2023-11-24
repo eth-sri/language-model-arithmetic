@@ -1,7 +1,7 @@
 import os, sys
 path = os.path.abspath(os.getcwd())
 sys.path.append(path)
-from model_arithmetic import Evaluation, ModelArithmetic, load_model, LLMPrompt, Max, KL_indicator, enable_logging
+from model_arithmetic import Evaluation, ModelArithmetic, load_model, PromptedLLM, Max, KL_indicator, enable_logging
 import torch
 from loguru import logger
 from transformers import set_seed
@@ -92,8 +92,8 @@ def eval_multiple(formula, datasets, name, limit=None, num_fewshot=0, batch_size
 
 if __name__ == "__main__":
     with logger.catch():
-        gpt2xl = LLMPrompt("", prompt_template=lambda e, f: f"{f}", model="gpt2-xl")
-        gpt2xl_no_context = LLMPrompt("", prompt_template=lambda e, f: f"", model="gpt2-xl")
+        gpt2xl = PromptedLLM("", prompt_template=lambda e, f: f"{f}", model="gpt2-xl")
+        gpt2xl_no_context = PromptedLLM("", prompt_template=lambda e, f: f"", model="gpt2-xl")
         formulas = [
             gpt2xl,
             1.5 * gpt2xl - 0.5 * gpt2xl_no_context,

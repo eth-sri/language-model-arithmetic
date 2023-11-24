@@ -144,7 +144,7 @@ def extract_KL(monitor):
             return model["KL_divergence"]["mean"]
         
     for model in monitor["models_monitor"]:
-        if model["class"] == "LLMPrompt":
+        if model["class"] == "PromptedLLM":
             return model["KL_divergence"]["mean"]
 
 for index in range(48):

@@ -1,4 +1,4 @@
-from model_arithmetic import ModelArithmetic, LLMPrompt, Max, Classifier
+from model_arithmetic import ModelArithmetic, PromptedLLM, Max, Classifier
 from transformers import set_seed
 import pandas as pd
 import torch
@@ -8,85 +8,85 @@ set_seed(42)
 prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
 
 
-M = LLMPrompt(
+M = PromptedLLM(
     "You are a helpful assistant.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_sports = LLMPrompt(
+M_sports = PromptedLLM(
     "You are a helpful assistant that answers the user in a way that is related to sports.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_formal = LLMPrompt(
+M_formal = PromptedLLM(
     "You are an assistant using formal and objective language to answer the user.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_chef_angry = LLMPrompt(
+M_chef_angry = PromptedLLM(
     "You are an angry chef.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_angry = LLMPrompt(
+M_angry = PromptedLLM(
     "You are an angry assistant.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_chef = LLMPrompt(
+M_chef = PromptedLLM(
     "You are a chef.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_grandmother = LLMPrompt(
+M_grandmother = PromptedLLM(
     "You are a grandmother.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_child = LLMPrompt(
+M_child = PromptedLLM(
     "You are a child.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_adult = LLMPrompt(
+M_adult = PromptedLLM(
     "You are an adult.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_magic = LLMPrompt(
+M_magic = PromptedLLM(
     "You are a person who is always talking about magic.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_pirate = LLMPrompt(
+M_pirate = PromptedLLM(
     "You are a pirate.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_human = LLMPrompt(
+M_human = PromptedLLM(
     "You are a human.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_alien = LLMPrompt(
+M_alien = PromptedLLM(
     "You are an alien.",
     speculative_factor=1,
     prompt_template=prompt_template,
 )
 
-M_alien_human = LLMPrompt(
+M_alien_human = PromptedLLM(
     "You are an alien and a human.",
     speculative_factor=1,
     prompt_template=prompt_template,
@@ -110,7 +110,7 @@ C_formal3 = Classifier(M_child - 0.6 * M_adult, "s-nlp/roberta-base-formality-ra
 C_formal4 = Classifier(M_child - 0.6 * M_adult + 2 * Max(M_child, M_magic), "s-nlp/roberta-base-formality-ranker", prompt_template=lambda e, f: "",
                         n_runs_per_sample=100, batch_size=26, use_bayes=True, minimize=False)
 
-gpt2 = LLMPrompt("", model="gpt2-xl", speculative_factor=1, prompt_template=lambda e, f: f"{e}{f}")
+gpt2 = PromptedLLM("", model="gpt2-xl", speculative_factor=1, prompt_template=lambda e, f: f"{e}{f}")
 detector = Classifier(gpt2, "roberta-base-openai-detector", prompt_template=lambda e, f: "", minimize=False, use_bayes=True,
                       n_runs_per_sample=50, batch_size=26)
 

@@ -1,5 +1,5 @@
 import torch
-from model_arithmetic import ModelArithmetic, Evaluation, LLMPrompt, Superseded, Autocomplete, enable_logging, Union
+from model_arithmetic import ModelArithmetic, Evaluation, PromptedLLM, Superseded, Autocomplete, enable_logging, Union
 from transformers import set_seed
 import pandas as pd
 import os
@@ -109,16 +109,16 @@ emotions = lambda emotion: f"You are {emotion} assistant."
 easy = "You are a helpful assistant using very simple and straightforward language with short words to answer the user."
 topical = lambda topic: f"You are a helpful assistant that answers the user in a way that is related to {topic}."
 
-normal_prompt = lambda k=1, group=None, model_name=None: LLMPrompt(normal, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
-formal_prompt = lambda k=1, group=None, model_name=None: LLMPrompt(formal, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
-happy_prompt = lambda k=1, group=None, model_name=None: LLMPrompt(happy, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
+normal_prompt = lambda k=1, group=None, model_name=None: PromptedLLM(normal, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
+formal_prompt = lambda k=1, group=None, model_name=None: PromptedLLM(formal, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
+happy_prompt = lambda k=1, group=None, model_name=None: PromptedLLM(happy, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
 emotion_prompts = {
-    emotion: lambda k=1, group=None, model_name=None, e=emotion: LLMPrompt(emotions(e), speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
+    emotion: lambda k=1, group=None, model_name=None, e=emotion: PromptedLLM(emotions(e), speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
     for emotion in ["an angry", "a sad", "a caring", "a loving"]
 }
-easy_prompt = lambda k=1, group=None, model_name=None: LLMPrompt(easy, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
+easy_prompt = lambda k=1, group=None, model_name=None: PromptedLLM(easy, speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
 topical_prompts = {
-    topic: lambda k=1, group=None, model_name=None, t=topic: LLMPrompt(topical(t), speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
+    topic: lambda k=1, group=None, model_name=None, t=topic: PromptedLLM(topical(t), speculative_factor=k, prompt_template=prompt_template, group=group, model=model_name)
     for topic in ["arts and culture", "business and entrepreneurs", "celebrity and pop culture", "diaries and daily life", "family", 
                   "fashion and style", "film, tv and video", "fitness & health", "food", "gaming", "learning",
                   "music", "news and social concern", "other hobbies", "relationships", "science and technology", "sports", "travel and adventure", 

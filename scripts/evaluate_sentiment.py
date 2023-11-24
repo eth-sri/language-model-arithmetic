@@ -1,5 +1,5 @@
 import torch
-from model_arithmetic import ModelArithmetic, Evaluation, LLMPrompt, enable_logging, load_tokenizer
+from model_arithmetic import ModelArithmetic, Evaluation, PromptedLLM, enable_logging, load_tokenizer
 from transformers import set_seed
 import pandas as pd
 from formulas_sentiment import *

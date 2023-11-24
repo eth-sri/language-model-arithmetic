@@ -16,14 +16,14 @@ Model arithmetic allows you to combine prompts, models, and classifiers to creat
 For instance, you can easily interpolate between two differently-prompted models as follows:
 
 ```python
-from model_arithmetic import ModelArithmetic, LLMPrompt
+from model_arithmetic import ModelArithmetic, PromptedLLM
 
 # define model prompt template
 prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
 
 # define two differently-prompted models
-M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
-M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template)
+M_child = PromptedLLM("You are a child.", prompt_template=prompt_template)
+M_adult = PromptedLLM("You are an adult.", prompt_template=prompt_template)
 
 # model arithmetic expression
 formula1 = M_child - 0.6 * M_adult
@@ -41,14 +41,14 @@ Note that the `generate_text` function can also take a list of input sentences a
 You can integrate classifiers into your model arithmetic expressions. For instance, you can use a classifier to control the formality of your output:
 
 ```python
-from model_arithmetic import ModelArithmetic, LLMPrompt, Classifier
+from model_arithmetic import ModelArithmetic, PromptedLLM, Classifier
 
 # define model prompt template
 prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
 
 # define two differently-prompted models
-M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
-M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template)
+M_child = PromptedLLM("You are a child.", prompt_template=prompt_template)
+M_adult = PromptedLLM("You are an adult.", prompt_template=prompt_template)
 
 # construct model arithmetic expression
 formula1 = M_child - 0.6 * M_adult
@@ -68,15 +68,15 @@ print(ma.generate_text("Write a one-sentence fairy tale.", max_length=128))
 ### Union and intersection
 You can also use our custom operators to generate text. For instance, you can use the Union operator to add some magic touch to the fairy tale:
 ```python
-from model_arithmetic import ModelArithmetic, LLMPrompt, Union, Classifier
+from model_arithmetic import ModelArithmetic, PromptedLLM, Union, Classifier
 
 # define model prompt template
 prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
 
 # define three differently-prompted models
-M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
-M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template)
-M_magic = LLMPrompt("You are a person who is always talking about magic.", prompt_template=prompt_template)
+M_child = PromptedLLM("You are a child.", prompt_template=prompt_template)
+M_adult = PromptedLLM("You are an adult.", prompt_template=prompt_template)
+M_magic = PromptedLLM("You are a person who is always talking about magic.", prompt_template=prompt_template)
 
 # construct model arithmetic expression
 formula_part1 = M_child - 0.6 * M_adult + 2 * Union(M_child, M_magic)
@@ -95,7 +95,7 @@ print(ma.generate_text("Write a one-sentence fairy tale."))
 ### About models
 A formula can have terms using different models, as long as all models have the same tokenizer. One can specify a specific model for a certain term by setting the `model` parameter:
 ```python
-M_child = LLMPrompt("You are a child.", prompt_template=prompt_template, model="meta-llama/Llama-2-7b-chat-hf")
+M_child = PromptedLLM("You are a child.", prompt_template=prompt_template, model="meta-llama/Llama-2-7b-chat-hf")
 ```
 The selected model can also be a `PreTrainedModel` instead of a `string`.
 
@@ -108,8 +108,8 @@ ma = ModelArithmetic(formula, default_model="meta-llama/Llama-2-13b-chat-hf", dt
 Speculative sampling can be performed by initializing the prompted models with the extra `speculative_factor` parameter and setting the `do_speculation` parameter in the generation function to `True`:
 ```python
 ...
-M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
-M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template, speculative_factor=4)
+M_child = PromptedLLM("You are a child.", prompt_template=prompt_template)
+M_adult = PromptedLLM("You are an adult.", prompt_template=prompt_template, speculative_factor=4)
 ...
 print(ma0.generate_text("Write a one-sentence fairy tale.", do_speculation=True))
 ```
@@ -118,7 +118,7 @@ Note that one prompted model should always have `speculative_factor=1` (the defa
 ### Eager mode
 By default, we process the key-value cache stored by models since this is required for speculative sampling. Since different models use key-value caching differently, this can result in errors. We therefore included the `run_eager` parameter in the initialization of the prompted model to disable all speculative sampling which should fix this issue if it occurs:
 ```python
-M_child = LLMPrompt("You are a child.", prompt_template=prompt_template, run_eager=True)
+M_child = PromptedLLM("You are a child.", prompt_template=prompt_template, run_eager=True)
 ```
 
 ### Other Operators

@@ -219,7 +219,7 @@ class RunnableOperator(Operator):
         assert self.model is not None, "Model must be set before initializing."
         
 
-class LLMPrompt(RunnableOperator):
+class PromptedLLM(RunnableOperator):
     def __init__(self, prompt_string, model=None, speculative_factor=1, 
                  prompt_template = lambda prompt_string, input_string, : prompt_string + "\n" + input_string, dtype=None, group=None,
                  enable_cache=True, dim_keys_past=2, dim_values_past=2, run_eager=False, tokenizer=None, **kwargs):
@@ -507,7 +507,7 @@ class LLMPrompt(RunnableOperator):
         return logprobs
 
     def __str__(self):
-        return f"LLMPrompt('{self.prompt_string}', model='{self.model}')"
+        return f"PromptedLLM('{self.prompt_string}', model='{self.model}')"
         
         
 class Autocomplete(RunnableOperator):

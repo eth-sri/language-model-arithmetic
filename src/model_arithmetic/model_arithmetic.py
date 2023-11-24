@@ -11,7 +11,7 @@ import os
 import time
 from .operators import Operator
 from .monitor import Monitor
-from .runnable_operators import RunnableOperator, LLMPrompt
+from .runnable_operators import RunnableOperator, PromptedLLM
 from .input import TokenizedInput
 import random
 from .lm_eval_compatibility import Compatibility
@@ -67,7 +67,7 @@ class ModelArithmetic(PreTrainedModel):
         self.load_all_models(dtype=dtype)
         if self.default_model not in self.loaded_models:
             for runnable_operator in self.runnable_operators:
-                if isinstance(runnable_operator, LLMPrompt) and runnable_operator.model is not None:
+                if isinstance(runnable_operator, PromptedLLM) and runnable_operator.model is not None:
                     self.default_model = runnable_operator.model
                     break
             if self.default_model is None:
@@ -131,7 +131,7 @@ class ModelArithmetic(PreTrainedModel):
         """
         if self.default_model is None:
             for runnable_operator in self.runnable_operators:
-                    if isinstance(runnable_operator, LLMPrompt) and runnable_operator.model is not None:
+                    if isinstance(runnable_operator, PromptedLLM) and runnable_operator.model is not None:
                         self.default_model = str(runnable_operator.model)
                         break
         

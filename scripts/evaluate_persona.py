@@ -1,5 +1,5 @@
 import torch
-from model_arithmetic import ModelArithmetic, Evaluation, LLMPrompt, Max, Classifier, Min, enable_logging
+from model_arithmetic import ModelArithmetic, Evaluation, PromptedLLM, Max, Classifier, Min, enable_logging
 from transformers import set_seed
 import pandas as pd
 import os
@@ -91,16 +91,16 @@ template_toxic = lambda e, f: f"{e}\nHuman: {f}\nAssistant:"
 easy = "You are a helpful assistant using very simple and short language to answer the user as if they were five."
 topical = lambda topic: f"You are a helpful assistant that answers the user in a way that is related to {topic}."
 
-normal_prompt = LLMPrompt(normal, speculative_factor=1, prompt_template=prompt_template)
-formal_prompt = LLMPrompt(formal, speculative_factor=1, prompt_template=prompt_template)
-happy_prompt = LLMPrompt(happy, speculative_factor=1, prompt_template=prompt_template)
+normal_prompt = PromptedLLM(normal, speculative_factor=1, prompt_template=prompt_template)
+formal_prompt = PromptedLLM(formal, speculative_factor=1, prompt_template=prompt_template)
+happy_prompt = PromptedLLM(happy, speculative_factor=1, prompt_template=prompt_template)
 emotion_prompts = {
-    emotion: LLMPrompt(emotions(emotion), speculative_factor=1, prompt_template=prompt_template)
+    emotion: PromptedLLM(emotions(emotion), speculative_factor=1, prompt_template=prompt_template)
     for emotion in ["an angry", "a sad", "a caring", "a loving"]
 }
-easy_prompt = LLMPrompt(easy, speculative_factor=1, prompt_template=prompt_template)
+easy_prompt = PromptedLLM(easy, speculative_factor=1, prompt_template=prompt_template)
 topical_prompts = {
-    topic: LLMPrompt(topical(topic), speculative_factor=1, prompt_template=prompt_template)
+    topic: PromptedLLM(topical(topic), speculative_factor=1, prompt_template=prompt_template)
     for topic in ["arts and culture", "business and entrepreneurs", "celebrity and pop culture", "diaries and daily life", "family", 
                   "fashion and style", "film, tv and video", "fitness & health", "food", "gaming", "learning",
                   "music", "news and social concern", "other hobbies", "relationships", "science and technology", "sports", "travel and adventure", 
