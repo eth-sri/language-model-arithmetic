@@ -10,56 +10,126 @@ In order to install model arithmetic with Python 3, run
 python -m pip install -e .
 ```
 
-## Library Usage
-This library is designed for performing arithmetic operations using language models. The primary usage involves constructing a formula with multiple `Operator` objects and encapsulating it in the `ModelArithmetic` class. This class integrates seamlessly with the transformers library, resembling the usage of a `PreTrainedModel`. The preferred method for working with this library is through the `generate_text` function. Examples can be found in the `scr/examples.py` file.
+## Getting Started
+Model arithmetic allows you to combine prompts, models, and classifiers to create new, precisely controlled LLMs that combine aspects of each component.
 
-### Key Components
-#### Operators
-The library provides a variety of operators, which can be employed in typical Python expressions like addition, multiplication, and using integers and floats. Unique operators such as `Max` (or `Union`) and `Min` (or `Intersection`) are also available, similar to Python's `max` and `min` functions but require importing from this library. All formulas adhere to the syntax detailed in the accompanying paper.
+For instance, you can easily interpolate between two differently-prompted models as follows:
 
-#### Specifically Notable Operators
+```python
+from model_arithmetic import ModelArithmetic, LLMPrompt
 
-1. `LLMPrompt` Operator:
-   - Purpose: Implements a language model with a specific input prompt.
-   - Arguments:
-        - `model`: A `PreTrainedModel` or a model name string from the transformers library.
-        - `prompt_template`: A function mapping a prompt and an input input string to an output. A typical example would be:
-        ```python
-        lambda prompt, input: f"###Instruction: {prompt} \n ###Input: {input} \n ###Output:"
-        ```
-        - `prompt_string`: Replaces the prompt in `prompt_template`.
-        - `speculative_factor`: A factor for speculative sampling (optional).
-2. `Classifier` Operator:
-   - Purpose: Implements a classifier.
-   - Arguments:
-      - `model`: Similar to `LLMPrompt`.
-      - `formula`: Operator for computing top k likely tokens. `Classifier` will only compute probabilities on the most likely tokens from this formula at this step, and use a simple approximation for all other tokens. Typically, this formula is set equal to the formula that is being used for inference without the `Classifier` itself.
-      - `n_runs_per_sample`: The "k" value for top tokens.
-      - `batch_size`: Batch size for processing; if None, the same batch size as supplied to the generate function is used.
-      - `prompt_template`: Similar to `LLMPrompt`. Typically an empty lambda for classifiers.
-      - `minimize`: Boolean indicating whether to minimize the classifier output.
+# define model prompt template
+prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
 
-3. `Superseded` Operator:
+# define two differently-prompted models
+M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
+M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template)
 
-   - Purpose: Implements speculative sampling as detailed in our paper.
-   - Usage: `Superseded(m, M)` where `m` and `M` are language models (`Operators`).
+# model arithmetic expression
+formula1 = M_child - 0.6 * M_adult
 
-#### Other Operators
+# generate text as usual
+ma0 = ModelArithmetic(formula1, default_model="meta-llama/Llama-2-13b-chat-hf")
+print(ma0.generate_text("Write a one-sentence fairy tale."))
+# -> ["  Oh my gumdrops! Let me tell you a super special fairy tale 'bout a teeny tiny princess who lived in a fluffy white castle with her sparkly unicorn and they had the most amazing adventures together!</s>"]
+```
 
-Operators like `TopPTopK`, `ClassifierStrength`, `HardConstraint`, and `Indicator` are also available, but the above-mentioned operators cover most use cases.
+Note that the `generate_text` function can also take a list of input sentences and works with standard arguments such as `temperature`, `top_p`, `top_k`, `batch_size`, `num_return_sequences` and `stop_texts` (a list of strings at which the generation should be stopped).
 
-##### Model Arithmetic Class
+### Integrating Classifiers
 
-The `ModelArithmetic` class offers various parameters for generating formulas:
-- `formula`: The arithmetic formula.
-- `default_model`: A default model for all `LLMPrompt` instances, if applicable.
+You can integrate classifiers into your model arithmetic expressions. For instance, you can use a classifier to control the formality of your output:
 
-Functionality:
-- Saving/Loading: Use `from_pretrained` and `to_pretrained` for model persistence.
-- Generation: Use `generate_text` for generating text. The main arguments are:
-    - `sentences`: a list of strings, the input sentences
-    - Well-known arguments like `batch_size`, `temperature`, `top_p`, `top_k`, and `max_length`
-- The `generate` function offers similar functionality as `generate_text` but starts with `input_ids`, a list of tokenized input ids.
+```python
+from model_arithmetic import ModelArithmetic, LLMPrompt, Classifier
+
+# define model prompt template
+prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
+
+# define two differently-prompted models
+M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
+M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template)
+
+# construct model arithmetic expression
+formula1 = M_child - 0.6 * M_adult
+
+# Initialize the classifier, the first and third arguments are used to determine on which completion tokens the classifier should be run (on the 50 most likely tokens of formula1 here). The prompt template shown here ensures that the input sentence is ignored for the classifier guidance
+C_formal = Classifier(formula1, "s-nlp/roberta-base-formality-ranker", n_runs_per_sample=50, prompt_template=lambda e, f: "")
+
+# integrate classifier into model arithmetic expression
+formula2 = formula1 + C_formal
+
+# generate text as usual
+ma = ModelArithmetic(formula2, default_model="meta-llama/Llama-2-13b-chat-hf")
+print(ma.generate_text("Write a one-sentence fairy tale.", max_length=128))
+# -> ['  "Once upon a time, in a magical land filled with fluffy clouds and sparkly rainbows, there was a little girl named me who went on a fun adventure with my stuffed unicorn named Mr. Snuggles!"</s>']
+```
+
+### Union and intersection
+You can also use our custom operators to generate text. For instance, you can use the Union operator to add some magic touch to the fairy tale:
+```python
+from model_arithmetic import ModelArithmetic, LLMPrompt, Union, Classifier
+
+# define model prompt template
+prompt_template = lambda formula_string, input_string: f"<s>[INST]<<SYS>>\n{formula_string}\n<</SYS>>\n\n{input_string} [/INST]"
+
+# define three differently-prompted models
+M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
+M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template)
+M_magic = LLMPrompt("You are a person who is always talking about magic.", prompt_template=prompt_template)
+
+# construct model arithmetic expression
+formula_part1 = M_child - 0.6 * M_adult + 2 * Union(M_child, M_magic)
+
+# integrate classifier in the expression
+C_formal = Classifier(formula_part1, "s-nlp/roberta-base-formality-ranker", n_runs_per_sample=50, 
+                      prompt_template=lambda e, f: "")
+
+formula = formula_part1 + C_formal
+
+# generate text as usual
+ma = ModelArithmetic(formula, default_model="meta-llama/Llama-2-13b-chat-hf")
+print(ma.generate_text("Write a one-sentence fairy tale."))
+# -> ['  "Once upon a time, in a magical forest filled with sparkling flowers and talking animals, there lived a little girl named Lily who had a special gift for conjuring delicious rainbow-colored cupcakes that made everyone who ate them feel happy and dance with joy!"</s>']
+```
+### About models
+A formula can have terms using different models, as long as all models have the same tokenizer. One can specify a specific model for a certain term by setting the `model` parameter:
+```python
+M_child = LLMPrompt("You are a child.", prompt_template=prompt_template, model="meta-llama/Llama-2-7b-chat-hf")
+```
+The selected model can also be a `PreTrainedModel` instead of a `string`.
+
+Models are by default loaded in bfloat16 format. You can change this by specifying the `dtype` parameter in the `ModelArithmetic` constructor:
+```python
+ma = ModelArithmetic(formula, default_model="meta-llama/Llama-2-13b-chat-hf", dtype=torch.float32)
+```
+
+### Speculative sampling
+Speculative sampling can be performed by initializing the prompted models with the extra `speculative_factor` parameter and setting the `do_speculation` parameter in the generation function to `True`:
+```python
+...
+M_child = LLMPrompt("You are a child.", prompt_template=prompt_template)
+M_adult = LLMPrompt("You are an adult.", prompt_template=prompt_template, speculative_factor=4)
+...
+print(ma0.generate_text("Write a one-sentence fairy tale.", do_speculation=True))
+```
+Note that one prompted model should always have `speculative_factor=1` (the default value).
+
+### Eager mode
+By default, we process the key-value cache stored by models since this is required for speculative sampling. Since different models use key-value caching differently, this can result in errors. We therefore included the `run_eager` parameter in the initialization of the prompted model to disable all speculative sampling which should fix this issue if it occurs:
+```python
+M_child = LLMPrompt("You are a child.", prompt_template=prompt_template, run_eager=True)
+```
+
+### Other Operators
+Finally, the library provides some other operators that can be used in formulas, of which we present a few here. The `TopPTopK` operator allows the use of nucleus and top-k sampling within a formula. The following ensures that the output token is always in the top 10 words of `model1`:
+```python
+formula = TopPTopK(model1, top_k=10) + model2
+```
+The `Superseded` operator implements [speculative sampling](https://arxiv.org/abs/2302.01318) directly:
+```python
+formula = Superseded(small_model, large_model)
+```
 
 ## LM Evaluation Harness
 
