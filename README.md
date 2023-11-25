@@ -34,7 +34,11 @@ print(ma0.generate_text("Write a one-sentence fairy tale."))
 # -> ["  Oh my gumdrops! Let me tell you a super special fairy tale 'bout a teeny tiny princess who lived in a fluffy white castle with her sparkly unicorn and they had the most amazing adventures together!</s>"]
 ```
 
-Note that the `generate_text` function can also take a list of input sentences and works with standard arguments such as `temperature`, `top_p`, `top_k`, `batch_size`, `num_return_sequences` and `stop_texts` (a list of strings at which the generation should be stopped).
+Note that the `generate_text` function can also take a list of input sentences and works with standard arguments such as `temperature`, `top_p`, `top_k`, `batch_size`, `num_return_sequences` and `stop_texts` (a list of strings at which the generation should be stopped). You can also save and load a `ModelArithmetic` object:
+```python
+ma0.to_pretrained('model')
+ma0 = ModelArithmetic.from_pretrained('model')
+```
 
 ### Integrating Classifiers
 
