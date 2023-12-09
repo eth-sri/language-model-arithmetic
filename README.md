@@ -1,6 +1,6 @@
 # Controlled Text Generation via Language Model Arithmetic
 
-This repo contains the code for model arithmetic, a comprehensive framework where arithmetic formulas express combinations of LMs and classifiers, thereby biasing the generated text towards or away from desired attributes.
+This repo contains the code for [model arithmetic](https://arxiv.org/abs/2311.14479), a comprehensive framework where arithmetic formulas express combinations of LMs and classifiers, thereby biasing the generated text towards or away from desired attributes.
 
 ![Overview](overview.png)
 
@@ -178,3 +178,18 @@ bash scripts/main_preprocess.sh
 ```
 
 We note that part of our preprocessing code got lost, specifically for preparing the dataset that is used for finetuning the toxicity classifier. Running the code without using the preprocessed datasets might therefore result in slightly different numbers when they involve the finetuned classifier.
+
+### Cite this work
+
+```
+@article{dekoninck-2023-controlled,
+  author       = {Jasper Dekoninck and
+                  Marc Fischer and
+                  Luca Beurer{-}Kellner and
+                  Martin T. Vechev},
+  title        = {Controlled Text Generation via Language Model Arithmetic},
+  journal      = {CoRR},
+  volume       = {abs/2311.14479},
+  year         = {2023},
+}
+```
