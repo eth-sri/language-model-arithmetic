@@ -23,6 +23,7 @@ class ModelArithmetic(PreTrainedModel):
     Main class for prompt arithmetic. Handles the generation of text based on the formula.
     """
     SAVE_FILE = "prompt_arithmetic.json"
+    _supports_sdpa = True
 
     def __init__(self, formula : Operator, default_model : str = None, dtype=torch.bfloat16, intermediate_argmax : bool = False, epsilon = 1e-12, 
                  retroactive_operators = [], calculate_statistics=True, needs_input_tokens_lm_eval=False, lm_eval_task=None, tokenizer=None):
