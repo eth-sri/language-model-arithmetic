@@ -5,7 +5,7 @@ class TokenizedInput:
     """
     Keeps track of the tokenized input of a runnable operator. Automatically sets the correct tokens, by using the runnable operator's get_prompt method.
     """
-    def __init__(self, runnable_operator, model_name, model_config, tokenizer):
+    def __init__(self, runnable_operator, model_name, model_config, tokenizer, max_length=None):
         """
         Initialize the TokenizedInput object.
 
@@ -20,9 +20,14 @@ class TokenizedInput:
         self.only_input_tokens = None
         self.tokenizer = tokenizer
         self.max_length = get_max_length(model_config)
+        if max_length is not None:
+            self.max_length = min(self.max_length, max_length)
         self.set_inputs([""])
         # this is essentially what huggingface also does, but it is kinda hidden in their sample code (GenerationMixin.generate)
         self.tokenizer.padding_side = "left"
+
+    def synchronize_max_lengths(self, tokenized_inputs):
+        self.max_length = min([tokenized_input.max_length for tokenized_input in tokenized_inputs])
         
     def extend_batch_size(self, batch_size):
         """
@@ -34,6 +39,8 @@ class TokenizedInput:
         Args:
             batch_size (int): The desired batch size.
         """
+        if len(self.input_tokens) == 0:
+            self.set_inputs([""])
         if len(self.input_tokens) != batch_size:
             self.input_tokens = [self.input_tokens[0]] * batch_size
     

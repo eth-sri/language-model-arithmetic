@@ -6,6 +6,8 @@ from transformers import set_seed, Trainer, TrainingArguments, DataCollatorWithP
 import torch
 from .dataset import CustomDataset
 from sklearn.model_selection import train_test_split
+from sacrebleu.metrics import BLEU
+from rouge_score import rouge_scorer
 from .basic_model_loader import load_model, load_tokenizer
 import os
 from .model_arithmetic import ModelArithmetic
@@ -22,7 +24,7 @@ class Evaluation(BaseClass):
     """
     This class is used for evaluating a model's performance on a given dataset.
     It includes methods for preparing the dataset, evaluating the model, generating samples, 
-    calculating perplexity and faithfulness of the model.
+    calculating perplexity, faithfulness, and performance of the model.
     """
     def __init__(self, generator=None, dataset_location=None, dataset=None, train_dataset=None, train_dataset_location=None, 
                  n_input_words=5, bleurt_checkpoint="../models/BLEURT-20", **kwargs):
@@ -86,7 +88,7 @@ class Evaluation(BaseClass):
             log(logger.debug, "No label column found, assuming all labels are 1")
             self.dataset["label"] = 1
 
-    def evaluate_lm_eval(self, model, task_name, batch_size, num_fewshot, model_args, no_cache=False, limit=None, write_out=False, output_folder=None, **kwargs):
+    def evaluate_lm_eval(self, model, task_name, batch_size, num_fewshot, model_args, limit=None, write_out=False, **kwargs):
         """
         Evaluates the model using the lm_eval package. 
 
@@ -96,28 +98,26 @@ class Evaluation(BaseClass):
             batch_size (int): The batch size to be used for evaluation.
             num_fewshot (int): The number of fewshot examples to be used for evaluation.
             model_args (dict): The arguments to be passed to the model.
-            no_cache (bool, optional): Whether to use cached results or not.
             limit (int, optional): The maximum number of examples to be used for evaluation.
             write_out (bool, optional): Whether to write out the results or not.
-            output_folder (string, optional): The folder to write out the results.
             **kwargs: Additional keyword arguments.
         """
         try:
             from lm_eval import evaluator
+            from lm_eval.models.huggingface import HFLM
         except ImportError:
             raise ImportError("Please install lm_eval to run this function")
         
         results = evaluator.simple_evaluate(
-            model=model,
+            model=HFLM(model),
             model_args=model_args,
             tasks=[task_name],
             num_fewshot=num_fewshot,
             batch_size=batch_size,
             device="cuda" if torch.cuda.is_available() else "cpu",
-            no_cache=no_cache,
+            use_cache=None,
             limit=limit,
-            write_out=write_out,
-            output_base_path=output_folder
+            write_out=write_out
         )
         if "lm_eval" in self.output:
             self.output["lm_eval"][task_name] = results
@@ -126,10 +126,10 @@ class Evaluation(BaseClass):
 
     def evaluate(self, max_tokens=128, store_file=None, reload=True, 
                  dataset_file=None, reload_data=True, preserve_memory=False, batch_size=1, do_perspective=True,
-                 speculation=False, only_faithfulness=False,
+                 speculation=False,
                  **kwargs):
         """
-        Evaluates the model on the dataset and calculates the perplexity and faithfulness
+        Evaluates the model on the dataset and calculates the perplexity, faithfulness, and performance.
 
         Args:
             max_tokens (int, optional): The maximum number of tokens to be used for evaluation.
@@ -170,13 +170,10 @@ class Evaluation(BaseClass):
         if preserve_memory and hasattr(self.generator, "clear_memory"):  # can have weird side effects!
             self.generator.clear_memory()
 
-        if not only_faithfulness:
-            self.perplexity(self.dataset, **kwargs)
-        else:
-            del self.output['faithfulness']
+        self.perplexity(self.dataset, **kwargs)
         self.faithfulness_multiple(self.dataset, **kwargs)
-        
-        if do_perspective and not only_faithfulness:
+        self.performance(self.dataset, **kwargs)
+        if do_perspective:
             self.perspective(**kwargs)
             if dataset_file is not None:
                 log(logger.info, f"Saving dataset to {dataset_file}")
@@ -261,7 +258,7 @@ class Evaluation(BaseClass):
         """
         start_time = time.time()
         if "generated" not in self.dataset.columns:
-            texts = self.generator.generate_text(self.dataset["input"].tolist(), max_length=max_tokens, 
+            texts = self.generator.generate_text(self.dataset["input"].tolist(), max_new_tokens=max_tokens, 
                                                  batch_size=batch_size, temperature=temperature, 
                                                  top_p=top_p, top_k=top_k, stop_texts=stop_texts, do_speculation=speculation)
             self.dataset["generated"] = texts
@@ -285,7 +282,7 @@ class Evaluation(BaseClass):
         log(logger.debug, f"Saving generated samples to {output_location}")
         self.dataset.to_csv(output_location)
 
-    def get_perplexity(self, dataset, model, tokenizer, **kwargs):
+    def compute_perplexities(self, dataset, model, tokenizer, **kwargs):
         """
         Calculates the perplexity of the generated sentences.
 
@@ -329,6 +326,24 @@ class Evaluation(BaseClass):
                 n_tokens += n_tokens_here
                 if not np.isnan(perplexity):
                     perplexities.append(perplexity)
+                else:
+                    perplexities.append(None)
+            else:
+                perplexities.append(None)
+
+        return perplexities, sum_nllos, n_tokens
+
+    def get_perplexity(self, dataset, model, tokenizer, **kwargs):
+        """
+        Calculates the perplexity of the generated sentences.
+
+        Args:
+            dataset (pd.DataFrame): The dataset to be used for evaluation. Has columns "input" (for input text), "generated" (for generated text). 
+            model (PreTrainedModel): The model to be evaluated.
+            tokenizer (Tokenizer): The tokenizer to be used for tokenizing the sentences.
+            **kwargs: Additional keyword arguments.
+        """
+        perplexities, sum_nllos, n_tokens = self.compute_perplexities(dataset, model, tokenizer, **kwargs)
 
         average = np.mean(perplexities)
         median = np.median(perplexities)
@@ -508,3 +523,78 @@ class Evaluation(BaseClass):
             "mean": average_prediction,
             "std": std        
         }
+
+    def performance(self, dataset, **kwargs):
+        """
+        Calculates the performance of the model on the dataset. Only calculates the performance if the dataset has an output column (which is the ground truth).
+
+        Args:
+            dataset (pd.DataFrame): The dataset to be used for evaluation. Has columns "input" (for input text), "generated" (for generated text) and "output" (output ground truth). 
+            **kwargs: Additional keyword arguments.
+        """
+        # need to measure the average overlap between the output and the generated text
+        log(logger.info, "Calculating performance")
+        if "performance" in self.output:
+            log(logger.info, f"Reloading performance. Performance is {self.output['performance']}")
+            return self.output["performance"]
+
+        if "output" not in dataset.columns:
+            log(logger.info, "Dataset does not have output column, cannot calculate performance")
+            return None
+        
+        class Args:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+        args = Args(smooth_method="exp", smooth_value=None, lc=False, tokenize="none", force=False)
+        try:
+            bleu = BLEU(args=args)
+        except Exception:
+            bleu = BLEU()
+        bleu_score = bleu.corpus_score(dataset["generated"].tolist(), [dataset["output"].tolist()]).score
+
+        try:
+            from bleurt import score
+            scorer = score.BleurtScorer(self.bleurt_checkpoint)
+            bleurt_score = np.mean(scorer.score(candidates=dataset["generated"].tolist(), 
+                                                references=dataset["output"].tolist(), batch_size=1))
+            del scorer
+            torch.cuda.empty_cache()
+        except ImportError:
+            log(logger.warning, "Could not import BLEURT, skipping BLEURT score")
+            bleurt_score = 0
+        except AssertionError as e:
+            log(logger.warning, f"Could not score BLEURT, {e}")
+            bleurt_score = 0
+
+        rouge = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
+        rouge1_scores = []
+        rouge2_scores = []
+        rougeL_scores = []
+
+        # Loop through the dataset
+        for i in range(len(dataset)):
+            # Calculate the Rouge scores (rouge1, rouge2, and rougeL)
+            scores = rouge.score(dataset["generated"].iloc[i], dataset["output"].iloc[i])
+            
+            # Add the scores to the corresponding lists
+            rouge1_scores.append(scores["rouge1"])
+            rouge2_scores.append(scores["rouge2"])
+            rougeL_scores.append(scores["rougeL"])
+
+        # Calculate the average Rouge scores for each metric
+        avg_rouge1 = np.nanmean([score.fmeasure for score in rouge1_scores])
+        avg_rouge2 = np.nanmean([score.fmeasure for score in rouge2_scores])
+        avg_rougeL = np.nanmean([score.fmeasure for score in rougeL_scores])
+
+        output = {
+            "bleu": bleu_score,
+            "bleurt": bleurt_score,
+            "rouge1": avg_rouge1,
+            "rouge2": avg_rouge2,
+            "rougeL": avg_rougeL
+        }
+        
+        log(logger.info, f"Performance is {output}")
+        self.output["performance"] = output
+
+        return output

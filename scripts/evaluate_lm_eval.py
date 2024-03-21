@@ -55,8 +55,7 @@ def evaluate(task_name, formula, save_path, default_model, num_fewshot=0, limit=
                                  dtype=dtype, needs_input_tokens_lm_eval=True, lm_eval_task=task_name)
 
     evaluator.evaluate_lm_eval(model=arithmetic, model_args=model_args, task_name=task_name, batch_size=batch_size, 
-                               num_fewshot=num_fewshot, 
-                               limit=limit, no_cache=no_cache, save_path=save_path, write_out=True, output_folder=output_folder)
+                               num_fewshot=num_fewshot, limit=limit, write_out=True)
     evaluator.save(save_path)
     
 def eval_multiple(formula, datasets, name, limit=None, num_fewshot=0, batch_size=1):

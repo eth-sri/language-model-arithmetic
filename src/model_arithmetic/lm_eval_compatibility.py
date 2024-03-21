@@ -149,8 +149,8 @@ class Compatibility:
             input_shape (torch.tensor): The shape of the input tokens
         """
         if self.needs_input_tokens_lm_eval:
-            if torch.is_tensor(logprobs) and len(logprobs.shape) == 3 and logprobs.shape[1] != input_shape[1]:
+            if torch.is_tensor(logprobs) and len(logprobs.shape) == 3 and logprobs.shape[1] != input_shape[1] + 1:
                 # set the output to the correct shape, by adding zeros in the beggining in the first axis
-                logprobs = torch.cat([torch.zeros((logprobs.shape[0], input_shape[1] - logprobs.shape[1], logprobs.shape[2]), device=logprobs.device), logprobs], dim=1)
+                logprobs = torch.cat([torch.zeros((logprobs.shape[0], input_shape[1] + 1 - logprobs.shape[1], logprobs.shape[2]), device=logprobs.device), logprobs], dim=1)
         
         return logprobs

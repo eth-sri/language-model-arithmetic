@@ -5,7 +5,6 @@ import numpy as np
 from .utils import get_max_length, ENABLE_LOGGING, log
 import torch
 from collections import namedtuple
-from transformers import top_k_top_p_filtering
 from loguru import logger
 import os
 import time
@@ -13,8 +12,8 @@ from .operators import Operator
 from .monitor import Monitor
 from .runnable_operators import RunnableOperator, PromptedLLM
 from .input import TokenizedInput
-import random
 from .lm_eval_compatibility import Compatibility
+from .top_k_top_p_filtering import top_k_top_p_filtering
 
 
 
@@ -25,8 +24,8 @@ class ModelArithmetic(PreTrainedModel):
     SAVE_FILE = "prompt_arithmetic.json"
     _supports_sdpa = True
 
-    def __init__(self, formula : Operator, default_model : str = None, dtype=torch.bfloat16, intermediate_argmax : bool = False, epsilon = 1e-12, 
-                 retroactive_operators = [], calculate_statistics=True, needs_input_tokens_lm_eval=False, lm_eval_task=None, tokenizer=None):
+    def __init__(self, formula : Operator, default_model : str = None, dtype=torch.bfloat16, intermediate_argmax : bool = False, epsilon = 1e-6, 
+                 retroactive_operators = [], calculate_statistics=True, needs_input_tokens_lm_eval=False, lm_eval_task=None, tokenizer=None, max_length=None):
         """Initializes the prompt arithmetic model.
 
         Args:
@@ -40,8 +39,9 @@ class ModelArithmetic(PreTrainedModel):
             needs_input_tokens_lm_eval (bool, optional): Whether or not lm eval is used and whether or not the task needs the input tokens. Defaults to False. Only set to true for an lm eval task.
             lm_eval_task (str, optional): Name of the lm eval task. Defaults to None.
             tokenizer (transformers.tokenization_utils_base.PreTrainedTokenizerBase, optional): Tokenizer to use. Defaults to None.
+            max_length (int, optional): Maximum length of the input. Defaults to None.
         """
-        self.formula = formula.clone()
+        self.formula = formula
 
         self.default_model = default_model
         self.loaded_models = dict()
@@ -50,12 +50,13 @@ class ModelArithmetic(PreTrainedModel):
         self.model_last_token_prediction = [] # keeps track of the last token that has been predicted for each RunnableOperator
         
         self.output_type = namedtuple("ModelArithmeticOutput", ["logits", "logprobs_per_model"])
+        self.logits_type = namedtuple("ModelArithmeticLogits", ["logits"])
         self.intermediate_argmax = intermediate_argmax
         self.retroactive_operators = retroactive_operators
         self.calculate_statistics = calculate_statistics
 
         self.runnable_operators = []
-        for runnable_operator in self.formula.runnable_operators():
+        for runnable_operator in self.formula.get_operators(RunnableOperator):
             if not any([runnable_operator.same_operator(output) for output in self.runnable_operators]):
                 self.runnable_operators.append(runnable_operator)
                 
@@ -69,15 +70,17 @@ class ModelArithmetic(PreTrainedModel):
         if self.default_model not in self.loaded_models:
             for runnable_operator in self.runnable_operators:
                 if isinstance(runnable_operator, PromptedLLM) and runnable_operator.model is not None:
-                    self.default_model = runnable_operator.model
+                    self.default_model = runnable_operator.get_model_name()
                     break
             if self.default_model is None:
                 raise ValueError("Default model must be specified if not specified in an llm prompt")
 
         self.config = self.loaded_models[str(self.default_model)].config
-
         if tokenizer is None:
-            self.tokenizer = load_tokenizer(self.default_model)
+            if hasattr(self.config, "_name_or_path"):
+                self.tokenizer = load_tokenizer(self.config._name_or_path)
+            else:
+                self.tokenizer = load_tokenizer(self.default_model)
         else:
             self.tokenizer = tokenizer
         
@@ -86,10 +89,12 @@ class ModelArithmetic(PreTrainedModel):
         self.model_input_tokens = {
             runnable_operator.id(): TokenizedInput(runnable_operator, 
                                                     runnable_operator.model, 
-                                                    self.loaded_models[str(runnable_operator.model)].config,
-                                                    self.tokenizer) 
+                                                    self.loaded_models[str(runnable_operator.get_model_name())].config,
+                                                    self.tokenizer, max_length=max_length) 
             for runnable_operator in self.runnable_operators
         }
+        for tokenized_input in self.model_input_tokens.values():
+            tokenized_input.synchronize_max_lengths(self.model_input_tokens.values())
         
         self.init_monitor()
         
@@ -107,7 +112,7 @@ class ModelArithmetic(PreTrainedModel):
             )
         else:
             self.lm_eval_compatibility = None
-            
+        
         super().__init__(self.config)
         
     def init_monitor(self):
@@ -124,6 +129,12 @@ class ModelArithmetic(PreTrainedModel):
                 runnable_operator.model = self.default_model
             runnable_operator.initialize_after_model_set()
 
+    def eval(self):
+        """Sets the model to evaluation mode
+        """
+        for model in self.loaded_models.values():
+            model.eval()
+
     def load_all_models(self, dtype=torch.bfloat16):
         """Loads all the models that are needed for the runnable operators. Models are never loaded twice.
 
@@ -133,18 +144,18 @@ class ModelArithmetic(PreTrainedModel):
         if self.default_model is None:
             for runnable_operator in self.runnable_operators:
                     if isinstance(runnable_operator, PromptedLLM) and runnable_operator.model is not None:
-                        self.default_model = str(runnable_operator.model)
-                        break
+                        self.default_model = runnable_operator.get_model_name()
         
         for runnable_operator in self.runnable_operators:
             if runnable_operator.model is None:
                 assert self.default_model is not None, "Default model must be specified if not specified in prompt"
                 runnable_operator.model = self.default_model
-            if runnable_operator.model not in self.loaded_models:
+            if runnable_operator.get_model_name() not in self.loaded_models:
                 model = runnable_operator.load_model(dtype=dtype)
-                model.eval()
+
                 if model is not None:
-                    self.loaded_models[str(runnable_operator.model)] = model
+                    model.eval()
+                    self.loaded_models[runnable_operator.get_model_name()] = model
         
         if len(self.loaded_models) == 0:
             assert self.default_model is not None, "Required to at least have one model, for now"
@@ -191,7 +202,8 @@ class ModelArithmetic(PreTrainedModel):
         return cls(**all_settings, dtype=dtype)
 
         
-    def forward_model(self, runnable_operator, continuation_tokens, model_new_tokens=None, use_cache=False, do_speculation=False):
+    def forward_model(self, runnable_operator, continuation_tokens, model_new_tokens=None, use_cache=False, do_speculation=False, 
+                      attention_mask=None):
         """Runs a specifc runnable operator on the continuation tokens.
 
         Args:
@@ -207,18 +219,24 @@ class ModelArithmetic(PreTrainedModel):
         start_time = time.time()
         
         tokenized_input_creator = self.model_input_tokens[runnable_operator.id()]
-        tokenized_inputs = tokenized_input_creator.add_continuation_tokens(continuation_tokens)
-        tokenized_only_input = tokenized_input_creator.get_only_input_tokens()
-        
+        if attention_mask is None:
+            tokenized_inputs = tokenized_input_creator.add_continuation_tokens(continuation_tokens)
+        else:
+            tokenized_inputs = {"input_ids": continuation_tokens, "attention_mask": attention_mask}            
+
+        tokenized_only_input = tokenized_input_creator.get_only_input_tokens()        
         was_none = model_new_tokens is None
         
         if was_none:
             model_new_tokens = torch.tensor([len(continuation_tokens[i]) + 1 for i in range(len(continuation_tokens))])
-        
+
         if len(self.model_prediction_history) < len(continuation_tokens):
-            new_prediction_history = [dict() for _ in range(len(continuation_tokens))]
+            new_prediction_history = [[dict()] for _ in range(len(continuation_tokens))]
         else:
-            new_prediction_history = [self.model_prediction_history[i].get(self.max_index_prediction_history(i), dict()) for i in range(len(continuation_tokens))]
+            new_prediction_history = [
+                [self.model_prediction_history[i].get(self.max_index_prediction_history(i) - k, dict()) for k in range(model_new_tokens[i])] 
+                for i in range(len(continuation_tokens))
+            ]
             
         logprobs = runnable_operator.run(
             loaded_models=self.loaded_models,
@@ -228,13 +246,15 @@ class ModelArithmetic(PreTrainedModel):
             other_tokenizer=self.tokenizer,
             tokenized_only_input=tokenized_only_input, 
             use_cache=use_cache,
-            do_speculation=do_speculation
+            do_speculation=do_speculation,
         )
         
         logprobs = [logprob.to(self.device) for logprob in logprobs]
         
         if was_none:
-            logprobs = torch.stack(logprobs, dim=0)
+            val = model_new_tokens[0]
+            if torch.all(model_new_tokens == val):
+                logprobs = torch.stack(logprobs, dim=0)
 
         self.monitor.add_result(element=time.time() - start_time, runnable_operator=runnable_operator)
         return logprobs
@@ -312,9 +332,8 @@ class ModelArithmetic(PreTrainedModel):
         Returns:
             _type_: _description_
         """
-        init_time = time.time()
         logprobs_normalized = self.formula.evaluate(model_history)
-        self.monitor.add_result(element=time.time() - init_time, indicator="formula_evaluation")
+
         if not torch.is_tensor(logprobs_normalized):
             return None
         # logprobs_normalized = logprobs_normalized / temperature
@@ -338,7 +357,8 @@ class ModelArithmetic(PreTrainedModel):
             accepted = operator.accept(tokenized_sentence, self.tokenizer)
             if accepted < 0:
                 not_accepted_token = tokenized_sentence[accepted]
-                self.clear_model_prediction_history(index, tokenized_sentence, from_=len(tokenized_sentence) + accepted)
+                self.clear_model_prediction_history(index, tokenized_sentence, from_=len(tokenized_sentence) + accepted, 
+                                                    temperature=temperature, top_k=top_k, top_p=top_p)
                 tokenized_sentence = tokenized_sentence[:len(tokenized_sentence) + accepted]
                 
                 self.logprobs_history[index][len(tokenized_sentence)][not_accepted_token] = -torch.inf
@@ -443,14 +463,15 @@ class ModelArithmetic(PreTrainedModel):
                 
                 if do_speculation_sample:
                     if self.calculate_statistics:
-                        self.monitor.add_result(self.expected_acceptance_prob(self.create_sample_logprobs(new_model_probs, temperature, top_k, top_p), 
-                                                                              self.create_sample_logprobs(self.logprobs_history[i].get(n_token), temperature, top_k, top_p)), 
+                        previous_models_probs = self.create_sample_logprobs(self.logprobs_history[i].get(n_token), temperature, top_k, top_p)
+                        new_model_probs = self.create_sample_logprobs(new_model_probs, temperature, top_k, top_p)
+                        self.monitor.add_result(self.expected_acceptance_prob(new_model_probs, previous_models_probs), 
                                             indicator="expected_acceptance_prob", runnable_operator=runnable_operator)
 
                     new_token, kept = self.speculation_sample(
                         token = generated_tokens[i][n_token],
-                        previous_models_probs=self.create_sample_logprobs(self.logprobs_history[i][n_token], temperature, top_k, top_p),
-                        new_models_probs=self.create_sample_logprobs(new_model_probs, temperature, top_k, top_p), 
+                        previous_models_probs=previous_models_probs,
+                        new_models_probs=new_model_probs, 
                     )
                     if n_token in self.model_prediction_history[i]:
                         self.logprobs_history[i][n_token] = new_model_probs
@@ -459,7 +480,8 @@ class ModelArithmetic(PreTrainedModel):
                         # if not kept, we change the generated tokens and remove the model prediction history after that token
                         generated_tokens[i][n_token] = new_token
                         generated_tokens[i] = generated_tokens[i][:n_token + 1]
-                        self.clear_model_prediction_history(i, generated_tokens[i], from_=n_token)
+                        self.clear_model_prediction_history(i, generated_tokens[i], from_=n_token, 
+                                                            temperature=temperature, top_k=top_k, top_p=top_p)
                         self.trigger_end[i] = False
                         
                 elif n_token in self.model_prediction_history[i]:
@@ -472,7 +494,7 @@ class ModelArithmetic(PreTrainedModel):
         return all_kept
     
 
-    def clear_model_prediction_history(self, index, generated_tokens_index, from_=-1):
+    def clear_model_prediction_history(self, index, generated_tokens_index, temperature, top_k, top_p, from_=-1):
         """Clears the model prediction history for a specific sample in the batch. First deletes all history of finished tokens, then 
         deletes history of tokens that were prediction, but then got removed because of speculation
 
@@ -487,7 +509,8 @@ class ModelArithmetic(PreTrainedModel):
             finished = self.formula.is_finished(self.model_prediction_history[index][token])
             if all_none or finished or (from_ != -1 and token > from_):
                 if finished and len(generated_tokens_index) > token and self.calculate_statistics:
-                    self.add_monitor_token_probs(generated_tokens_index[token], self.model_prediction_history[index][token], self.logprobs_history[index].get(token))
+                    self.add_monitor_token_probs(generated_tokens_index[token], self.model_prediction_history[index][token], self.logprobs_history[index].get(token), 
+                                                 temperature=temperature, top_k=top_k, top_p=top_p)
                 
                 if finished:
                     for model_index in range(len(self.model_last_token_prediction)):
@@ -509,6 +532,7 @@ class ModelArithmetic(PreTrainedModel):
             int: max index of its prediction
         """
         keys = list(self.model_prediction_history[index].keys())
+        
         if len(keys) == 0:
             return 0
         return max(self.model_prediction_history[index].keys())
@@ -558,7 +582,7 @@ class ModelArithmetic(PreTrainedModel):
         """
         return 1 - 1 / 2 * torch.sum(torch.abs(q - p)).item()
     
-    def add_monitor_token_probs(self, token, history, history_logprobs):
+    def add_monitor_token_probs(self, token, history, history_logprobs, temperature, top_k, top_p):
         """Adds some token probabilities to the monitor
 
         Args:
@@ -576,8 +600,9 @@ class ModelArithmetic(PreTrainedModel):
                 if history_logprobs is not None:
                     self.monitor.add_result(element=self.KL_divergence(torch.softmax(history_logprobs, dim=-1), torch.softmax(evaluated, dim=-1)).item(), 
                                             runnable_operator=runnable_operator, indicator="KL_divergence")
-        
+
         self.monitor.add_result(element=self.entropy(torch.softmax(history_logprobs, dim=-1)).item(), indicator="entropy")
+        
 
     def next_token_speculative(self, continuation_tokens, 
                                top_p=1.0, top_k=0, temperature=1.0, speculation=True, use_cache=True):
@@ -639,7 +664,33 @@ class ModelArithmetic(PreTrainedModel):
         """
         return self.forward(input_ids, **kwargs)
     
-    def forward(self, input_ids, normalize=True, **kwargs):
+    def set_inputs(self, inputs):
+        for runnable_operator_id in self.model_input_tokens:
+            self.model_input_tokens[runnable_operator_id].extend_batch_size(len(inputs))
+            self.model_input_tokens[runnable_operator_id].set_inputs(inputs)
+
+    def set_system_prompt(self, system_prompt):
+        for llm in self.get_operators(RunnableOperator):
+            llm.set_system_prompt(system_prompt)
+    
+    def forward_all_models(self, continuation_tokens, input_shape=None, attention_mask=None):
+        """Runs the forward pass of all models
+
+        Args:
+            continuation_tokens (list[list[int]]): Current continuation tokens
+
+        Returns:
+            dict: Dict mapping the runnable operator id to the logprobs of the model
+        """
+        logprobs_per_model = dict()
+        for runnable_operator in self.runnable_operators:
+            logprobs = self.forward_model(runnable_operator, continuation_tokens, attention_mask=attention_mask)
+            if input_shape is not None:
+                logprobs = self.lm_eval_compatibility.forward_post_processing(logprobs, input_shape)
+            logprobs_per_model[runnable_operator.id()] = logprobs
+        return logprobs_per_model
+    
+    def forward(self, input_ids, attention_mask=None, normalize=True, **kwargs):
         """Runs the foward pass. This is needed for compatibility with lm-evaluation-harness
 
         Args:
@@ -650,7 +701,6 @@ class ModelArithmetic(PreTrainedModel):
             namedtuple: Named tuple of the ModelArithmetic model
         """
         ### this is a bit cheeky, but in order to be compatible with lm-evaluation-harness, we need to implement this method
-        logprobs_per_model = {runnable_operator.id(): None for runnable_operator in self.runnable_operators}
         if not isinstance(input_ids, list):
             input_shape = input_ids.shape
             continuation_tokens = self.lm_eval_compatibility.forward_preprocessing(input_ids, self.model_input_tokens)
@@ -658,14 +708,12 @@ class ModelArithmetic(PreTrainedModel):
             input_shape = None
             continuation_tokens = input_ids
 
-        for runnable_operator in self.runnable_operators:
-            logprobs = self.forward_model(runnable_operator, continuation_tokens)
-            if input_shape is not None:
-                logprobs = self.lm_eval_compatibility.forward_post_processing(logprobs, input_shape)
-            logprobs_per_model[runnable_operator.id()] = logprobs
+        logprobs_per_model = self.forward_all_models(continuation_tokens, input_shape=input_shape, attention_mask=attention_mask)
 
         output = self.formula.evaluate(logprobs_per_model, normalize=normalize)
-        return [output]
+        # create logits type
+        logits = self.logits_type(output)
+        return logits
 
     def get_decoded_tokens(self, next_tokens_batch):
         """Gets decoded tokens from the next tokens
@@ -690,13 +738,13 @@ class ModelArithmetic(PreTrainedModel):
         self.loaded_models = dict()
         torch.cuda.empty_cache()
 
-    def generate_text(self, sentences, max_length=1024, stop_texts=None, batch_size=None,
+    def generate_text(self, sentences, max_new_tokens=1024, stop_texts=None, batch_size=None,
                  temperature=1.0, top_p=1.0, top_k=0, num_return_sequences=1, do_speculation=False, use_cache=True, **kwargs):
         """Generates text based on the input params
 
         Args:
             sentences (list[str]): List of input sentences
-            max_length (int, optional): Max generation length. Defaults to 128.
+            max_new_tokens (int, optional): Max generation length. Defaults to 1024.
             stop_texts (list[str], optional): Strings at which to stop generation. Defaults to None.
             batch_size (int, optional): Batch size. Defaults to None (all at once).
             temperature (float, optional): temperature to use. Defaults to 1.0.
@@ -742,13 +790,14 @@ class ModelArithmetic(PreTrainedModel):
                         
         total_done = 0
         while len(current_indices) > 0:
+            print(generated_texts)
             start_time = time.time()
             generated_tokens_batch = [generated_tokens[index] for index in current_indices]
             next_tokens = self.next_token_speculative(generated_tokens_batch, top_p, top_k, 
                                                       temperature, speculation=do_speculation, use_cache=use_cache)
             for i in range(len(next_tokens)):
                 next_tokens[i] = self.run_retroactive_operators(i, next_tokens[i], temperature, top_k, top_p)
-                self.clear_model_prediction_history(i, next_tokens[i])
+                self.clear_model_prediction_history(i, next_tokens[i], temperature, top_k, top_p)
             decoded_tokens = self.get_decoded_tokens(next_tokens)
 
             for i, index in enumerate(current_indices):
@@ -758,7 +807,7 @@ class ModelArithmetic(PreTrainedModel):
             indices_to_remove = []
             for i in range(len(current_indices)):
                 sentences[current_indices[i]] = start_sentences[current_indices[i]] + generated_texts[current_indices[i]]
-                if any([stop_text in generated_texts[current_indices[i]] for stop_text in stop_texts]) or len(generated_tokens[current_indices[i]]) >= max_length:
+                if any([stop_text in generated_texts[current_indices[i]] for stop_text in stop_texts]) or len(generated_tokens[current_indices[i]]) >= max_new_tokens:
                     if len(self.model_prediction_history[i]) == 0:
                         indices_to_remove.append(i)
                     else:
@@ -791,7 +840,7 @@ class ModelArithmetic(PreTrainedModel):
                         log(logger.debug, f"Progress: {total_done / len(sentences):.3f}")
                         
                 for runnable_operator_id in self.model_input_tokens:
-                        self.model_input_tokens[runnable_operator_id].set_inputs([start_sentences[index] for index in current_indices])
+                    self.model_input_tokens[runnable_operator_id].set_inputs([start_sentences[index] for index in current_indices])
 
             self.monitor.add_result(element=time.time() - start_time)
             
@@ -828,7 +877,7 @@ class ModelArithmetic(PreTrainedModel):
         if eos_token_id is not None:
             stopping_sequences += [self.tokenizer.decode([eos_token_id])]
             
-        texts = self.generate_text(input_texts, max_length=max_new_tokens, stop_texts=stopping_sequences,
+        texts = self.generate_text(input_texts, max_new_tokens=max_new_tokens, stop_texts=stopping_sequences,
                                     batch_size=batch_size, temperature=temperature, top_p=top_p, top_k=top_k, use_cache=use_cache)
         encoded_texts = self.tokenizer.batch_encode_plus(texts, add_special_tokens=False, return_tensors="pt").input_ids.to(self.device)
         # concatenate the input_ids with the encoded_texts

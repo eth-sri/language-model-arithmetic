@@ -193,7 +193,7 @@ def example8():
     return formulas, input_, 0.001
 
 if __name__ == "__main__":
-    formulas, input_, T = example7()
+    formulas, input_, T = example6()
     print(input_)
     print("-" * 50)
     for formula in formulas:

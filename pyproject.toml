@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "model_arithmetic"
-version = "1.0.0"
+version = "1.1.0"
 authors = [
   { name="Anonymous", email="anonymous@anonymous.com" },
 ]
@@ -34,5 +34,8 @@ dependencies = [
     "python-Levenshtein >= 0.21.1",
     "python_dotenv >= 1.0.0",
     "charset_normalizer>=3.2.0",
-    "aiohttp >= 3.8.5"
+    "aiohttp >= 3.8.5",
+    "sacrebleu >= 2.4.1",
+    "rouge_score >= 0.1.2"
+
 ]

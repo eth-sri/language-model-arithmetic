@@ -3,9 +3,11 @@ from .base import BaseClass
 from typing import Dict
 import copy
 from loguru import logger
-from transformers import top_k_top_p_filtering
 import dill
 from .utils import ENABLE_LOGGING, log
+import numpy as np
+from .basic_model_loader import load_tokenizer
+from .top_k_top_p_filtering import top_k_top_p_filtering
 
 class Operator(BaseClass):
     def __init__(self, minimum_value=-10 ** 8, **kwargs):
@@ -25,12 +27,21 @@ class Operator(BaseClass):
             output (List || torch.tensor): List or torch.tensor
         """
         if isinstance(output, list):
-            for el in range(len(output)):
-                if torch.is_tensor(output[el]):
-                    output[el][output[el] < self.minimum_value] = self.minimum_value
+            new_output = []  # Create a new list to store modified tensors
+            for el in output:
+                if torch.is_tensor(el):
+                    # Use torch.where to create a new tensor
+                    new_el = torch.where(el < self.minimum_value, self.minimum_value, el)
+                    new_output.append(new_el)
+                else:
+                    new_output.append(el)  # Append non-tensor elements as-is
+            return new_output
         elif torch.is_tensor(output):
-            output[output < self.minimum_value] = self.minimum_value
-        return output
+            # Use torch.where for out-of-place operation on tensors
+            return torch.where(output < self.minimum_value, self.minimum_value, output)
+        else:
+            return output  # Return the original output if it's neither a list nor a tensor
+
     
     def evaluate(self, runnable_operator_outputs : Dict, normalize : bool = True):
         """Evaluates the given object in the formula based on the language model outputs
@@ -62,13 +73,23 @@ class Operator(BaseClass):
         """
         raise NotImplementedError
     
-    def runnable_operators(self):
-        """Returns the Runnable Operators in the object
-
-        Raises:
-            NotImplementedError
+    def get_operators(self, class_):
         """
-        raise NotImplementedError
+        Returns a list of operators for the given class.
+        """
+        if isinstance(self, class_):
+            return [self]
+        return []
+    
+    def get_deduplicated_operators(self, class_):
+        """
+        Returns a list of operators for the given class.
+        """
+        operators = []
+        for operator in self.get_operators(class_):
+            if operator not in operators:
+                operators.append(operator)
+        return operators
 
     def is_finished(self, runnable_operator_outputs : Dict) -> bool:
         """Returns whether the object is finished
@@ -94,10 +115,9 @@ class Operator(BaseClass):
             return output
         if not torch.is_tensor(output):
             return output
-        output /= norm
-        output -= torch.logsumexp(output, dim=-1, keepdim=True)
+        output = output / norm
+        output = output - torch.logsumexp(output, dim=-1, keepdim=True)
         return output
-
 
     def __add__(self, other):
         if isinstance(other, (float, int)):
@@ -159,8 +179,69 @@ class Constant(Operator):
     def norm(self, runnable_operator_outputs=None):
         return self.constant
 
-    def runnable_operators(self):
-        return []
+    def is_finished(self, runnable_operator_outputs):
+        return True
+
+    def __str__(self):
+        return str(self.constant)
+    
+
+class Abs(Operator):
+    def __init__(self, formula):
+        """Initializes a constant operator with a given constant value.
+
+        Args:
+            constant (int, optional): The constant value. Defaults to 1.
+        """
+        super().__init__(formula=formula)
+
+    def evaluate(self, runnable_operator_outputs : Dict, normalize : bool = True):
+        return torch.abs(self.formula.evaluate(runnable_operator_outputs, normalize=normalize))
+    
+    def norm(self, runnable_operator_outputs=None):
+        return torch.abs(self.formula.norm(runnable_operator_outputs))
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula.get_operators(class_)
+
+    def is_finished(self, runnable_operator_outputs):
+        return self.formula.is_finished(runnable_operator_outputs)
+
+    def __str__(self):
+        return f"Abs({self.formula})"
+    
+class OptimizableConstant(Operator):
+    def __init__(self, init_val=1.0, use_norm=True):
+        """Initializes a constant operator with a given constant value.
+
+        Args:
+            constant (int, optional): The constant value. Defaults to 1.
+        """
+        if isinstance(init_val, (float, int)):
+            constant = torch.tensor(init_val, requires_grad=True, dtype=torch.float32)
+            init_val = (float) (init_val)
+        else:
+            init_val = init_val.to(torch.float32)
+            constant = init_val
+            constant.requires_grad = True
+        super().__init__(constant=constant, init_val=init_val, use_norm=use_norm)
+        
+    def reset(self):
+        """
+        Resets the constant value of the operator to its initial value and sets the requires_grad flag to True.
+        
+        Returns:
+            None
+        """
+        self.constant = torch.tensor(self.init_val, requires_grad=True, dtype=torch.float32)
+
+    def evaluate(self, runnable_operator_outputs : Dict, normalize : bool = True):
+        if not normalize:
+            return self.constant
+        return 1
+    
+    def norm(self, runnable_operator_outputs=None):
+        return self.constant
 
     def is_finished(self, runnable_operator_outputs):
         return True
@@ -168,6 +249,29 @@ class Constant(Operator):
     def __str__(self):
         return str(self.constant)
     
+    def __eq__(self, o: object) -> bool:
+        # only return true if they are the exact same object
+        return self is o
+    
+class AddNorm(Operator):
+    def __init__(self, formula, **kwargs):
+        super().__init__(formula=formula, **kwargs)
+
+    def evaluate(self, runnable_operator_outputs : Dict, normalize : bool = True):
+        return self.formula.evaluate(runnable_operator_outputs, normalize=normalize)
+    
+    def norm(self, runnable_operator_outputs=None):
+        return self.formula.norm(runnable_operator_outputs)
+    
+    def is_finished(self, runnable_operator_outputs: Dict) -> bool:
+        return self.formula.is_finished(runnable_operator_outputs)
+    
+    def __str__(self):
+        return self.formula.__str__()
+    
+    def __eq__(self, o: object) -> bool:
+        return self is o
+
 
 class Normalize(Operator):
     def __init__(self, formula):
@@ -183,9 +287,9 @@ class Normalize(Operator):
     
     def norm(self, runnable_operator_outputs=None):
         return 1
-
-    def runnable_operators(self):
-        return self.formula.runnable_operators()
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula.get_operators(class_)
 
     def is_finished(self, runnable_operator_outputs):
         return self.formula.is_finished(runnable_operator_outputs)
@@ -206,7 +310,7 @@ class Product(Operator):
         output = 1
         for factor in self.factors:
             factor_output = factor.evaluate(runnable_operator_outputs, normalize=False)
-            output *= factor_output
+            output = output * factor_output
         
         if normalize:
             return self.normalize(output, runnable_operator_outputs)
@@ -215,14 +319,14 @@ class Product(Operator):
     def norm(self, runnable_operator_outputs=None):
         output = 1
         for factor in self.factors:
-            output *= factor.norm(runnable_operator_outputs)
+            output = output * factor.norm(runnable_operator_outputs)
         return output
-
-    def runnable_operators(self):
-        prompts = []
+    
+    def get_operators(self, class_):
+        operators = []
         for factor in self.factors:
-            prompts += factor.runnable_operators()
-        return prompts
+            operators += factor.get_operators(class_)
+        return super().get_operators(class_) + operators
 
     def is_finished(self, runnable_operator_outputs):
         return all([factor.is_finished(runnable_operator_outputs) for factor in self.factors])
@@ -252,25 +356,25 @@ class TopPTopK(Operator):
         elif len(output_shape) == 1:
             output = output.unsqueeze(0)
 
-        output = top_k_top_p_filtering(output / self.temperature, top_k=self.top_k, top_p=self.top_p)
+        output_new = top_k_top_p_filtering(output / self.temperature, top_k=self.top_k, top_p=self.top_p)
 
         if len(output_shape) > 2:
-            output = output.reshape(output_shape)
+            output_new = output_new.reshape(output_shape)
         elif len(output_shape) == 1:
-            output = output.squeeze(0)
+            output_new = output_new.squeeze(0)
 
-        output = torch.log_softmax(output, dim=-1)
-        output = self.set_to_minimum(output)  # important to avoid overflow errors (think - TopPTopK(...))
+        output_new_ = torch.log_softmax(output_new, dim=-1)
+        output_newest = self.set_to_minimum(output_new_)  # important to avoid overflow errors (think - TopPTopK(...))
         if normalize:
-            return output
-        return output * self.norm(runnable_operator_outputs)
+            return output_newest
+        return output_newest * self.norm(runnable_operator_outputs)
 
     def norm(self, runnable_operator_outputs=None):
         return self.formula.norm(runnable_operator_outputs)
-
-    def runnable_operators(self):
-        return self.formula.runnable_operators()
     
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula.get_operators(class_)
+
     def is_finished(self, runnable_operator_outputs):
         return self.formula.is_finished(runnable_operator_outputs)
 
@@ -290,7 +394,7 @@ class Sum(Operator):
         output = 0
         for term in self.terms:
             eval_ = term.evaluate(runnable_operator_outputs, normalize=False)
-            output += eval_
+            output = output + eval_
 
         if normalize:
             return self.normalize(output, runnable_operator_outputs)
@@ -299,14 +403,14 @@ class Sum(Operator):
     def norm(self, runnable_operator_outputs : Dict = None):
         output = 0
         for term in self.terms:
-            output += term.norm(runnable_operator_outputs)
+            output = output + term.norm(runnable_operator_outputs)
         return output
-
-    def runnable_operators(self):
-        prompts = []
+    
+    def get_operators(self, class_):
+        operators = super().get_operators(class_)
         for term in self.terms:
-            prompts += term.runnable_operators()
-        return prompts
+            operators += term.get_operators(class_)
+        return operators
 
     def is_finished(self, runnable_operator_outputs):
         return all([term.is_finished(runnable_operator_outputs) for term in self.terms])
@@ -337,9 +441,9 @@ class Indicator(Operator):
             return 0
         evaluation = self.evaluate(runnable_operator_outputs, normalize=False)
         return evaluation
-
-    def runnable_operators(self):
-        return self.formula.runnable_operators()
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula.get_operators(class_)
 
     def is_finished(self, runnable_operator_outputs):
         return self.formula.is_finished(runnable_operator_outputs)
@@ -374,8 +478,8 @@ class KL_indicator(Operator):
         KL_when_set_to_0 = torch.log((1 - prob_constraint + 1e-12) / (1 - prob_from + 1e-12)) + (1 + 1e-12) / (1 - prob_from + 1e-12) * (KL - divergence)
 
         if self.minimize:
-            KL_when_set_to_0 *= -1
-            KL *= -1
+            KL_when_set_to_0 = -KL_when_set_to_0
+            KL = -KL
             
         if self.top_k is None:
             evaluation[KL_when_set_to_0 - KL <= self.divergence] = 0
@@ -393,9 +497,9 @@ class KL_indicator(Operator):
             return 0
         evaluation = self.evaluate(runnable_operator_outputs, normalize=False)
         return evaluation
-
-    def runnable_operators(self):
-        return self.from_formula.runnable_operators() + self.constraint_formula.runnable_operators()
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.from_formula.get_operators(class_) + self.constraint_formula.get_operators(class_)
 
     def is_finished(self, runnable_operator_outputs):
         return self.from_formula.is_finished(runnable_operator_outputs) and self.constraint_formula.is_finished(runnable_operator_outputs)
@@ -443,9 +547,9 @@ class Max(Operator):
         if not torch.is_tensor(eval1) and not torch.is_tensor(eval2):
             return max(eval1, eval2)
         return torch.where(eval1 >= eval2, self.formula1.norm(runnable_operator_outputs), self.formula2.norm(runnable_operator_outputs)).to(torch.float32)
-
-    def runnable_operators(self):
-        return self.formula1.runnable_operators() + self.formula2.runnable_operators()
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula1.get_operators(class_) + self.formula2.get_operators(class_)
     
     def is_finished(self, runnable_operator_outputs):
         return self.formula1.is_finished(runnable_operator_outputs) and self.formula2.is_finished(runnable_operator_outputs)
@@ -473,9 +577,6 @@ class Min(Operator):
         if isinstance(formula2, (float, int)):
             formula2 = Constant(formula2)
         super().__init__(formula1=formula1, formula2=formula2, wait_until_finished=wait_until_finished, include_norm=include_norm)
-
-        if formula1.norm() != formula2.norm():
-            log(logger.warning, f"Min formula has different norms: {formula1.norm()}, {formula2.norm()}. This will lead to weird results.")
 
     def evaluate(self, runnable_operator_outputs : Dict, normalize : bool = True):
         if self.wait_until_finished and not self.is_finished(runnable_operator_outputs):
@@ -506,9 +607,9 @@ class Min(Operator):
         if not torch.is_tensor(eval1) and not torch.is_tensor(eval2):
             return min(eval1, eval2)
         return torch.where(eval1 >= eval2, self.formula2.norm(runnable_operator_outputs), self.formula1.norm(runnable_operator_outputs)).to(torch.float32)
-
-    def runnable_operators(self):
-        return self.formula1.runnable_operators() + self.formula2.runnable_operators()
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula1.get_operators(class_) + self.formula2.get_operators(class_)
     
     def is_finished(self, runnable_operator_outputs):
         return self.formula1.is_finished(runnable_operator_outputs) and self.formula2.is_finished(runnable_operator_outputs)
@@ -548,8 +649,8 @@ class Superseded(Operator):
     def norm(self, runnable_operator_outputs=None):
         return self.from_formula.norm(runnable_operator_outputs)
     
-    def runnable_operators(self):
-        return self.from_formula.runnable_operators() + self.by_formula.runnable_operators()
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.from_formula.get_operators(class_) + self.by_formula.get_operators(class_)
     
     def is_finished(self, runnable_operator_outputs):
         return self.by_formula.is_finished(runnable_operator_outputs)
@@ -612,8 +713,8 @@ class Functional(Operator):
         evaluation = self.formula.evaluate(runnable_operator_outputs, normalize=False)
         return evaluation
     
-    def runnable_operators(self):
-        return self.formula.runnable_operators()
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula.get_operators(class_)
     
     def is_finished(self, runnable_operator_outputs):
         return self.formula.is_finished(runnable_operator_outputs)
@@ -646,11 +747,42 @@ class SelfDebias(Operator):
     def norm(self, runnable_operator_outputs=None):
         return 1
     
-    def runnable_operators(self):
-        return self.from_formula.runnable_operators() + self.bias_formula.runnable_operators()
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.from_formula.get_operators(class_) + self.bias_formula.get_operators(class_)
     
     def is_finished(self, runnable_operator_outputs):
         return self.from_formula.is_finished(runnable_operator_outputs) and self.bias_formula.is_finished(runnable_operator_outputs)
     
     def __str__(self):
         return f"SelfDebias({self.from_formula}, {self.bias_formula}, {self.lambda_})"
+    
+    
+class Uniform(Operator):
+    def __init__(self, model_name):
+        """Initializes the Superseded operator with a from formula and a by formula.
+
+        Args:
+            from_formula: The from formula.
+            by_formula: The by formula.
+
+        Raises:
+            Warning: If the norms of the two formulas are different.
+        """
+        super().__init__(model_name=model_name)
+        tokenizer = load_tokenizer(model_name)
+        self.length = len(tokenizer)
+        
+    def evaluate(self, runnable_operator_outputs : Dict, normalize : bool = True):
+        return - np.log(self.length)
+    
+    def norm(self, runnable_operator_outputs=None):
+        return 1
+    
+    def get_operators(self, class_):
+        return super().get_operators(class_)
+    
+    def is_finished(self, runnable_operator_outputs):
+        return True
+    
+    def __str__(self):
+        return f"Uniform({self.model_name})"

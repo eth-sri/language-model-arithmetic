@@ -1,5 +1,8 @@
 # Controlled Text Generation via Language Model Arithmetic
 
+Note: this code contains updates compared to the version released when the paper was released. While reproduction of our results should still be possible on this branch, please refer to the `v1.0` branch for full reproduction. Updates include bug fixes related to gettings the logits from the models, model loading in some special cases, updates for keeping up-to-date with the newest version of LM-eval and Transformers, ... Note that the interface has almost entirely remained the same.
+
+
 This repo contains the code for [model arithmetic](https://arxiv.org/abs/2311.14479), a comprehensive framework where arithmetic formulas express combinations of LMs and classifiers, thereby biasing the generated text towards or away from desired attributes.
 
 ![Overview](overview.png)

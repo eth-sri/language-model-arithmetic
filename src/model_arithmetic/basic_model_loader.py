@@ -34,7 +34,8 @@ def load_tokenizer(dir_or_model):
         
     if os.path.isfile(os.path.join(dir_or_model, "config.json")):
         loaded_json = json.load(open(os.path.join(dir_or_model, "config.json"), "r"))
-        model_name = loaded_json["_name_or_path"]
+        if "_name_or_path" in loaded_json:
+            model_name = loaded_json["_name_or_path"]
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -46,26 +47,21 @@ def load_tokenizer(dir_or_model):
     return tokenizer
 
 def load_model(dir_or_model, classification=False, token_classification=False, return_tokenizer=False, dtype=torch.bfloat16, load_dtype=True, 
-                rl=False, peft_config=None):
+                rl=False, peft_config=None, device_map="auto", adapter_name='adapter'):
     """
     This function is used to load a model based on several parameters including the type of task it is targeted to perform.
     
     Args:
-        dir_or_model: It can be either a directory containing the pre-training model configuration details or a pretrained model.
-
-        classification (bool): If True, loads the model for sequence classification.
-
-        token_classification (bool): If True, loads the model for token classification.
-
-        return_tokenizer (bool): If True, returns the tokenizer along with the model.
-
-        dtype: The data type that PyTorch should use internally to store the model’s parameters and do the computation.
-
-        load_dtype (bool): If False, sets dtype as torch.float32 regardless of the passed dtype value.
-
-        rl (bool): If True, loads model specifically designed to be used in reinforcement learning environment.
-
-        peft_config: Configuration details for Peft models. 
+        - dir_or_model: It can be either a directory containing the pre-training model configuration details or a pretrained model.
+        - classification (bool): If True, loads the model for sequence classification.
+        - token_classification (bool): If True, loads the model for token classification.
+        - return_tokenizer (bool): If True, returns the tokenizer along with the model.
+        - dtype: The data type that PyTorch should use internally to store the model’s parameters and do the computation.
+        - load_dtype (bool): If False, sets dtype as torch.float32 regardless of the passed dtype value.
+        - rl (bool): If True, loads model specifically designed to be used in reinforcement learning environment.
+        - peft_config: Configuration details for Peft models. 
+        - device_map: The device to be used for loading the model.
+        - adapter_name: The name of the adapter to be used.
     
     Returns:
         It returns a model for the required task along with its tokenizer, if specified.
@@ -85,24 +81,24 @@ def load_model(dir_or_model, classification=False, token_classification=False, r
     original_model_name = model_name
 
     if classification:
-        model = AutoModelForSequenceClassification.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map="auto")  # to investigate: calling torch_dtype here fails.
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map=device_map)  # to investigate: calling torch_dtype here fails.
     elif token_classification:
-        model = AutoModelForTokenClassification.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map="auto")
+        model = AutoModelForTokenClassification.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map=device_map)
     elif rl:
         model = AutoModelForCausalLMWithValueHead.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, 
-                                                                  peft_config=peft_config, device_map="auto")
+                                                                  peft_config=peft_config, device_map=device_map)
     else:
         if model_name.endswith("GPTQ") or model_name.endswith("GGML"):
             model = AutoGPTQForCausalLM.from_quantized(model_name,
                                                         use_safetensors=True,
                                                         trust_remote_code=True,
                                                         # use_triton=True, # breaks currently, unfortunately generation time of the GPTQ model is quite slow
-                                                        quantize_config=None, device_map="auto")
+                                                        quantize_config=None, device_map=device_map)
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map="auto")
+            model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map=device_map)
 
     if is_lora_dir:
-        model = PeftModel.from_pretrained(model, dir_or_model)
+        model = PeftModel.from_pretrained(model, dir_or_model, adapter_name=adapter_name, device_map=device_map)
         
     try:
         tokenizer = load_tokenizer(original_model_name)

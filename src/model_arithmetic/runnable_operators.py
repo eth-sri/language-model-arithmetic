@@ -7,28 +7,41 @@ import json
 from .basic_model_loader import load_model, load_tokenizer
 from .utils import get_max_length, ENABLE_LOGGING, log
 from loguru import logger
+import dis
 
 
 class RunnableOperator(Operator):
-    def __init__(self, prompt_string="", model=None, speculative_factor=1, 
-                 prompt_template = lambda prompt_string, input_string: prompt_string + input_string, run_priority=0, group=None, 
+    def __init__(self, system_prompt="", model=None, speculative_factor=1, 
+                 prompt_template = lambda system_prompt, input_string: system_prompt + input_string, run_priority=0, group=None, 
                  outputs_logprobs=True, **kwargs):
+        # TODO: make save and load possible when filtering the input_string in the prompt_template, use byte64 and pickle
         """
         Initialize a runnable operator instance. A runnable operator is an operator that generates a probability distribution instead of modifies an existing one.
         
         Args:
-            prompt_string (str): String to be used as a prompt. Only used in specific runnable operators
+            system_prompt (str): String to be used as a prompt. Only used in specific runnable operators
             model (optional): Model to be used for operation. If None, the model must be set later to the default model to be used.
             speculative_factor (int): Factor for speculative sampling.
-            prompt_template (callable): Function for generating prompt. Takes two arguments: prompt_string and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
+            prompt_template (callable): Function for generating prompt. Takes two arguments: system_prompt and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
             run_priority (int): Priority for running the operation. Higher priority means the operation will be run first, especially important for the classifier.
             group (optional): Group to which the operator belongs. This ensures that speculative sampling will not be tried when not all operators of a group are finished.
             outputs_logprobs (bool): Whether the operator outputs logprobs.
             **kwargs: Arbitrary keyword arguments.
         """
-        super().__init__(speculative_factor=speculative_factor, model=model, prompt_string=prompt_string,
+        super().__init__(speculative_factor=speculative_factor, model=model, system_prompt=system_prompt,
                          prompt_template=prompt_template, run_priority=run_priority, group=group, outputs_logprobs=outputs_logprobs, **kwargs)
         self.cache = None
+
+    def get_model_name(self):
+        return self.model
+
+    def set_system_prompt(self, system_prompt):
+        """
+        Sets the prompt string for the operation.
+        Args:
+            system_prompt (str): String to be used as a prompt.
+        """
+        self.system_prompt = system_prompt
         
     def run_condition(self, new_tokens, trigger_end):
         """
@@ -65,15 +78,6 @@ class RunnableOperator(Operator):
             NotImplementedError: This method needs to be implemented by subclasses.
         """
         raise NotImplementedError("This method needs to be implemented by subclasses.")
-    
-    def runnable_operators(self):
-        """
-        Get a list of runnable operators used by the operator, usually only this operator itself.
-        
-        Returns:
-            list: List of runnable operators.
-        """
-        return [self]
     
     def same_operator(self, other):
         """
@@ -141,7 +145,7 @@ class RunnableOperator(Operator):
             dict: Settings for the operation.
         """
         kwargs = super().generate_settings()
-        kwargs["prompt_template"] = self.prompt_template("{{prompt_string}}", "{{input_string}}")
+        kwargs["prompt_template"] = self.prompt_template("{{system_prompt}}", "{{input_string}}")
         return kwargs
 
     @staticmethod
@@ -156,7 +160,7 @@ class RunnableOperator(Operator):
             Operator: Operator loaded from settings.
         """
         copy = settings["prompt_template"]
-        prompt_template = lambda prompt_string, input_string: copy.replace("{{prompt_string}}", prompt_string).replace("{{input_string}}", input_string)
+        prompt_template = lambda system_prompt, input_string: copy.replace("{{system_prompt}}", system_prompt).replace("{{input_string}}", input_string)
         settings["prompt_template"] = prompt_template
         return Operator.load_from_settings(settings)
     
@@ -170,7 +174,7 @@ class RunnableOperator(Operator):
         Returns:
             callable: Function for generating prompt.
         """
-        return self.prompt_template(self.prompt_string, input_string)
+        return self.prompt_template(self.system_prompt, input_string)
     
     def get_store_params(self):
         """
@@ -183,7 +187,7 @@ class RunnableOperator(Operator):
             "class": self.__class__.__name__,
             "model": self.model,
             "speculative_factor": self.speculative_factor,
-            "prompt_template": self.prompt_template(self.prompt_string, "{{input_string}}")
+            "prompt_template": self.prompt_template(self.system_prompt, "{{input_string}}")
         }
         
     def id(self):
@@ -194,7 +198,6 @@ class RunnableOperator(Operator):
             str: ID of the operation.
         """
         kwargs = self.kwargs.copy()
-        kwargs["prompt_template"] = self.prompt_template(self.prompt_string, "{{input_string}}")
         return f"{self.__class__.__name__}(**{kwargs})"
     
     def load_model(self, dtype):
@@ -220,16 +223,16 @@ class RunnableOperator(Operator):
         
 
 class PromptedLLM(RunnableOperator):
-    def __init__(self, prompt_string, model=None, speculative_factor=1, 
-                 prompt_template = lambda prompt_string, input_string, : prompt_string + "\n" + input_string, dtype=None, group=None,
-                 enable_cache=True, dim_keys_past=2, dim_values_past=2, run_eager=False, tokenizer=None, **kwargs):
+    def __init__(self, system_prompt, model=None, speculative_factor=1, 
+                 prompt_template = lambda system_prompt, input_string, : system_prompt + "\n" + input_string, dtype=None, group=None,
+                 enable_cache=True, dim_keys_past=2, dim_values_past=2, run_eager=False, tokenizer=None, model_name=None, **kwargs):
         """
         Initializes an LLM Prompt. This is a runnable operator that uses a language model to generate a probability distribution.
         Args:
-            prompt_string (str): String to be used as a prompt. Only used in specific runnable operators
+            system_prompt (str): String to be used as a prompt. Only used in specific runnable operators
             model (optional): Model to be used for operation. If None, the model must be set later to the default model to be used.
             speculative_factor (int): Factor for speculative sampling.
-            prompt_template (callable): Function for generating prompt. Takes two arguments: prompt_string and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
+            prompt_template (callable): Function for generating prompt. Takes two arguments: system_prompt and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
             run_priority (int): Priority for running the operation. Higher priority means the operation will be run first, especially important for the classifier.
             dtype (optional): Data type for the model.
             group (optional): Group to which the operator belongs. This ensures that speculative sampling will not be tried when not all operators of a group are finished.
@@ -246,9 +249,9 @@ class PromptedLLM(RunnableOperator):
                 dim_keys_past = 1
                 dim_values_past = 1
         
-        super().__init__(prompt_string=prompt_string, model=model, speculative_factor=speculative_factor, 
+        super().__init__(system_prompt=system_prompt, model=model, speculative_factor=speculative_factor, 
                          prompt_template=prompt_template, group=group, enable_cache=enable_cache, 
-                         dim_keys_past=dim_keys_past, dim_values_past=dim_values_past, run_eager=run_eager)
+                         dim_keys_past=dim_keys_past, dim_values_past=dim_values_past, run_eager=run_eager, model_name=model_name)
         self.dtype = dtype
         self.tokenizer_length = None
         self.tokenizer = tokenizer
@@ -270,8 +273,19 @@ class PromptedLLM(RunnableOperator):
     
     def initialize_after_model_set(self):
         if self.tokenizer is None:
-            tokenizer = load_tokenizer(self.model)
+            if isinstance(self.model, str):
+                tokenizer = load_tokenizer(self.model)
+            else:
+                tokenizer = load_tokenizer(self.model.name_or_path)
             self.tokenizer_length = len(tokenizer)
+
+    def get_model_name(self):
+        if isinstance(self.model, str):
+            return self.model
+        elif self.model_name is not None:
+            return self.model_name
+        elif self.model is not None:
+            return self.model.name_or_path
         
     def select_from_sample_cache(self, sample, from_=None, until=None):
         """Selects the cache from a sample that needs to be stored
@@ -478,19 +492,19 @@ class PromptedLLM(RunnableOperator):
             use_cache (bool): Whether to use the key-value cache.
         """
         if isinstance(self.model, str):
-            model = loaded_models[self.model]
+            model = loaded_models[self.get_model_name()]
         else:
             model = self.model
-        lengths = torch.sum(tokenized_inputs.attention_mask, dim=-1)
+        lengths = torch.sum(tokenized_inputs['attention_mask'], dim=-1)
         if self.cache is not None and self.enable_cache and use_cache:
-            self.delete_previous_cache(tokenized_inputs.input_ids, lengths)
+            self.delete_previous_cache(tokenized_inputs['input_ids'], lengths)
                 
         # if self.cache is not None:
         #     length_common_input_ids_per_sample = [
                 
         #     ]
-        actual_inputs = self.prepare_inputs(input_ids=tokenized_inputs.input_ids.to(model.device),
-                                            attention_mask=tokenized_inputs.attention_mask.to(model.device),
+        actual_inputs = self.prepare_inputs(input_ids=tokenized_inputs['input_ids'].to(model.device),
+                                            attention_mask=tokenized_inputs['attention_mask'].to(model.device),
                                             n_new_tokens=model_new_tokens)
         # run model 
         with torch.no_grad():
@@ -501,13 +515,16 @@ class PromptedLLM(RunnableOperator):
             logprobs = torch.log_softmax(model_output.logits[:, :, :self.tokenizer_length], dim=-1)
         
         if self.enable_cache and use_cache:
-            self.store_cache(model_output.past_key_values, tokenized_inputs.input_ids, lengths)
+            self.store_cache(model_output.past_key_values, tokenized_inputs['input_ids'], lengths)
             
         logprobs = [logprobs[i, -model_new_tokens[i] : ].to(torch.float32) for i in range(logprobs.shape[0])]
         return logprobs
 
     def __str__(self):
-        return f"PromptedLLM('{self.prompt_string}', model='{self.model}')"
+        return f"PromptedLLM('{self.system_prompt}', model='{self.get_model_name()}')"
+
+    def id(self):
+        return f"PromptedLLM('{self.system_prompt}', model='{self.get_model_name()}')"
         
         
 class Autocomplete(RunnableOperator):
@@ -665,15 +682,15 @@ class Autocomplete(RunnableOperator):
         return output
     
     def __str__(self):
-        return f"Autocomplete(model='{self.model}', speculative_factor={self.speculative_factor})"
+        return f"Autocomplete(model='{self.get_model_name()}', speculative_factor={self.speculative_factor})"
     
     def id(self):
-        return f"Autocomplete(model='{self.model}')"
+        return f"Autocomplete(model='{self.get_model_name()}')"
 
 
 class Classifier(RunnableOperator):
-    def __init__(self, formula, model, n_runs_per_sample, batch_size=None, dtype=None, prompt_string="", 
-                 prompt_template = lambda prompt_string, input_string: prompt_string + input_string, minimize=False, group=None, use_bayes=True, index=1,
+    def __init__(self, formula, model, n_runs_per_sample, batch_size=None, dtype=None, system_prompt="", 
+                 prompt_template = lambda system_prompt, input_string: system_prompt +  input_string, minimize=False, group=None, use_bayes=True, index=1,
                  tokenizer=None, **kwargs):
         """
         Initializes the classifier operator. This is a runnable operator that uses a classifier to generate a probability distribution.
@@ -681,10 +698,10 @@ class Classifier(RunnableOperator):
             formula (Operator): Formula to be used for the classifier.
             model (string || PreTrainedModel): Model to be used for the classifier.
             n_runs_per_sample (int): Number of tokens to be used for classification. This is the approxmiation made, the most likely "n_runs_per_sample" tokens of the formula will be used to compute the distribution, the rest is approximated
-            batch_size (int): Batch size to be used for classification. If None, all samples will be classified at once. (thus batch_size would be batch_size of the generator multiplied by n_runs_per_sample + 1)
+            batch_size (int): Batch size to be used for classification. If None, the batch size is the same as for the generation process.
             dtype (torch.dtype): Data type for the model.
-            prompt_string (string): String to be used as a prompt.
-            prompt_template (function): Function for generating prompt. Takes two arguments: prompt_string and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
+            system_prompt (string): String to be used as a prompt.
+            prompt_template (function): Function for generating prompt. Takes two arguments: system_prompt and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
             minimize (boolean): Whether to minimize the output of the classifier.
             group (string): Group to which the operator belongs. This ensures that speculative sampling will not be tried when not all operators of a group are finished.
             use_bayes (bool, optional): Whether to use bayes rule (and therefore use the minimization of the loss) when computing the distribution. In essence, this just subtracts the uniform distribution.
@@ -692,7 +709,7 @@ class Classifier(RunnableOperator):
             tokenizer (Tokenizer): Tokenizer to be used for the operation. If None, the default tokenizer will be used.
         """
         super().__init__(formula=formula, model=model, batch_size=batch_size, n_runs_per_sample=n_runs_per_sample, run_priority=-1, 
-                         prompt_string=prompt_string, prompt_template=prompt_template, minimize=minimize, group=group, use_bayes=use_bayes, index=index)
+                         system_prompt=system_prompt, prompt_template=prompt_template, minimize=minimize, group=group, use_bayes=use_bayes, index=index)
         
         if tokenizer is None:
             self.tokenizer = load_tokenizer(self.model)
@@ -714,25 +731,23 @@ class Classifier(RunnableOperator):
             return load_model(self.model, dtype=dtype, classification=True)
         return load_model(self.model, dtype=self.dtype, classification=True)
     
-    def run(self, tokenized_inputs, loaded_models, model_new_tokens, new_prediction_history, other_tokenizer, **kwargs):
+    def run_single(self, tokenized_inputs, model, correct_prediction_history, other_tokenizer):
         """
-        Runs the classifier on the tokenized inputs.
-        
+        Runs the model on a single input and returns the log probabilities of the output tokens.
+
         Args:
-            tokenized_inputs (torch.tensor): Inputs that have been tokenized.
-            loaded_models (Dict[PreTrainedModel]): Models that have been loaded. The model for this operation is in loaded_models[self.model]
-            model_new_tokens (List[int]): Number of new tokens per sample in the batch
-            new_prediction_history (Dict[model_name -> output]): Prediction History for the batch, this is used to determine the tokens to be used for classification.
-            other_tokenizer (Tokenizer): Tokenizer to be used for the decoding of the input tokens. This is necessary in order to prepare the inputs for the classifier.
+            tokenized_inputs (torch.tensor): The tokenized input to run the model on.
+            model (torch.nn.Module): The model to run.
+            correct_prediction_history (List[Dict(model_name->output)]): For each element in the batch, the prediction history of the model.
+            other_tokenizer (transformers.PreTrainedTokenizer): The tokenizer used to decode the input samples.
+
+        Returns:
+            torch.Tensor: The log probabilities of the output tokens.
         """
-        assert all([tokens == 1 for tokens in model_new_tokens]), "model_new_tokens must be 1 for this one (for now)."
-        # NOTE: here, we assume model_new_tokens is always 1 and thus we want to predict the next token in the sequence
-        if isinstance(self.model, str):
-            model = loaded_models[self.model]
-        else:
-            model = self.model
+    def run_single(self, input_ids, model, correct_prediction_history, other_tokenizer):
+        
         output_formula = [
-            self.formula.evaluate(new_prediction_history[i], normalize=True) for i in range(len(new_prediction_history))
+            self.formula.evaluate(correct_prediction_history[i], normalize=True) for i in range(len(correct_prediction_history))
         ]
         
         topk_tokens = [
@@ -740,21 +755,21 @@ class Classifier(RunnableOperator):
         ]
         
         input_samples = []
-        for i in range(len(tokenized_inputs.input_ids)):
-            input_samples.append(other_tokenizer.decode(tokenized_inputs.input_ids[i].tolist(), skip_special_tokens=True))
+        for i in range(len(input_ids)):
+            input_samples.append(other_tokenizer.decode(input_ids[i].tolist(), skip_special_tokens=True))
             for token in topk_tokens[i].indices:
-                input_samples.append(other_tokenizer.decode(tokenized_inputs.input_ids[i].tolist() + [token], skip_special_tokens=True))
+                input_samples.append(other_tokenizer.decode(input_ids[i].tolist() + [token], skip_special_tokens=True))
         
         if self.max_length is None:
             self.max_length = get_max_length(model.config)
-        # -2 in max_length is because of bs behavior by the roberta model
+        # -2 in max_length is because of weird behavior by the roberta model
         encoded_samples = self.tokenizer.batch_encode_plus(input_samples, return_tensors="pt", padding=True, truncation=True, max_length=self.max_length - 2).to(model.device)
         
         if "token_type_ids" in encoded_samples:
             del encoded_samples["token_type_ids"]
 
         if self.batch_size is None:
-            batch_size = len(tokenized_inputs) * (1 + self.n_runs_per_sample)
+            batch_size = len(input_ids)
         else:
             batch_size = self.batch_size
 
@@ -779,33 +794,81 @@ class Classifier(RunnableOperator):
             model_output_probs = 1 - model_output_probs
             model_outputs_logprobs = torch.log(torch.max(model_output_probs, torch.tensor([1e-12], device=model_output_probs.device)))
         
-        output_logprobs = torch.zeros((len(tokenized_inputs.input_ids), 1, len(other_tokenizer)), device=model_outputs_logprobs.device)
+        output_logprobs = torch.zeros((len(input_ids), 1, len(other_tokenizer)), device=model_outputs_logprobs.device)
         
-        for i in range(len(tokenized_inputs.input_ids)):
+        for i in range(len(input_ids)):
             # change the topk tokens with factor * (model_token_output - model_no_token_output)
             output_model_sample = model_outputs_logprobs[i * (1 + self.n_runs_per_sample) : (i + 1) * (1 + self.n_runs_per_sample)]
             normal_logprob = output_model_sample[0]
             if not self.use_bayes:
-                output_logprobs += normal_logprob 
+                output_logprobs = output_logprobs + normal_logprob 
             
             for j in range(self.n_runs_per_sample):
                 output_logprobs[i, -1, topk_tokens[i].indices[j]] = output_model_sample[j + 1]
                 if self.use_bayes:
-                    output_logprobs[i, -1, topk_tokens[i].indices[j]] -= normal_logprob
+                    output_logprobs[i, -1, topk_tokens[i].indices[j]] = output_logprobs[i, -1, topk_tokens[i].indices[j]] - normal_logprob
         
         if not self.use_bayes:
-            output_logprobs = torch.log_softmax(output_logprobs, dim=-1).to(torch.float32)
+            output_logprobs = torch.log_softmax(output_logprobs, dim=-1)
+                
         
-        return output_logprobs
+        return output_logprobs.to(torch.float32)
+        
+    
+    def run(self, tokenized_inputs, loaded_models, model_new_tokens, new_prediction_history, other_tokenizer, **kwargs):
+        """
+        Runs the classifier on the tokenized inputs.
+        
+        Args:
+            tokenized_inputs (torch.tensor): Inputs that have been tokenized.
+            loaded_models (Dict[PreTrainedModel]): Models that have been loaded. The model for this operation is in loaded_models[self.model]
+            model_new_tokens (List[int]): Number of new tokens per sample in the batch
+            new_prediction_history (List(List(Dict[model_name -> output]))): Prediction History for the batch, this is used to determine the tokens to be used for classification.
+            other_tokenizer (Tokenizer): Tokenizer to be used for the decoding of the input tokens. This is necessary in order to prepare the inputs for the classifier.
+        """
+        if not isinstance(tokenized_inputs, torch.Tensor):
+            tokenized_inputs = tokenized_inputs.input_ids
+        if all([tokens == 0 for tokens in model_new_tokens]):
+            return [[] for _ in range(model_new_tokens)]
+
+        if isinstance(self.model, str):
+            model = loaded_models[self.model]
+        else:
+            model = self.model
+            
+        to_run_further = [tokens > 0 for tokens in model_new_tokens]
+        
+        output_logits = [[] for _ in range(len(model_new_tokens))]
+        
+        current_iteration = 0
+        
+        while any(to_run_further):
+            indices = [i for i in range(len(to_run_further)) if to_run_further[i]]
+            # only select the tokens that are not yet finished
+            tokenized_inputs_ = [tokenized_inputs[i] for i in indices]
+            # tokenized_inputs_ = tokenized_inputs[indices]
+            if current_iteration > 0:
+                tokenized_inputs_ = tokenized_inputs_[:, :-current_iteration]
+                
+            correct_prediction_history = [new_prediction_history[i][current_iteration] for i in indices]
+            
+            outputs = self.run_single(
+                tokenized_inputs_, model, correct_prediction_history, other_tokenizer
+            )
+            
+            for index in range(len(indices)):
+                output_logits[indices[index]].append(outputs[index])
+            
+            current_iteration += 1
+            to_run_further = [tokens > current_iteration for tokens in model_new_tokens]
+        
+        return [torch.cat(output_logits[i], dim=0) for i in range(len(output_logits))]
 
     def __str__(self):
-        return f"Classifier('{self.prompt_string}', model='{self.model}', formula='{self.formula}', n_runs_per_sample={self.n_runs_per_sample}, minimize={self.minimize}, bayes={self.use_bayes})"
+        return f"Classifier('{self.system_prompt}', model='{self.get_model_name()}', formula='{self.formula}', n_runs_per_sample={self.n_runs_per_sample}, minimize={self.minimize}, bayes={self.use_bayes})"
     
-    def runnable_operators(self):
-        """
-        Returns a list of runnable operators used by the operator, usually only this operator itself.
-        """
-        return [self] + self.formula.runnable_operators()
+    def get_operators(self, class_):
+        return super().get_operators(class_) + self.formula.get_operators(class_)
 
     def norm(self, runnable_operator_outputs=None):
         """
@@ -823,8 +886,8 @@ class Classifier(RunnableOperator):
         
 
 class ClassifierStrength(RunnableOperator):
-    def __init__(self, model, batch_size=None, dtype=None, prompt_string="", 
-                 prompt_template = lambda prompt_string, input_string: prompt_string +  input_string, group=None, only_input=False,
+    def __init__(self, model, batch_size=None, dtype=None, system_prompt="", 
+                 prompt_template = lambda system_prompt, input_string: system_prompt +  input_string, group=None, only_input=False,
                  default_output=0.5, speculative_factor=1, tokenizer=None, **kwargs):
         """
         Initializes the classifier operator. This is a runnable operator that uses a classifier to generate a probability distribution.
@@ -832,8 +895,8 @@ class ClassifierStrength(RunnableOperator):
         Args:
             model (PreTrainedModel || string): Model to be used for the classifier.
             dtype (torch.dtype): Data type for the model.
-            prompt_string (string): String to be used as a prompt.
-            prompt_template (function): Function for generating prompt. Takes two arguments: prompt_string and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
+            system_prompt (string): String to be used as a prompt.
+            prompt_template (function): Function for generating prompt. Takes two arguments: system_prompt and input_string. The operator will be run on prompt_template(..., ...) + continuation_tokens
             group (string): Group to which the operator belongs. This ensures that speculative sampling will not be tried when not all operators of a group are finished.
             only_input (bool): Whether to only use the input for classification (and not the continuation tokens)
             default_output (float): Default output of the classifier.
@@ -841,7 +904,7 @@ class ClassifierStrength(RunnableOperator):
             tokenizer (Tokenizer): Tokenizer to be used for the operation. If None, the default tokenizer will be used.
         """
         super().__init__(model=model, batch_size=batch_size, run_priority=1, 
-                         prompt_string=prompt_string, prompt_template=prompt_template, group=group, outputs_logprobs=False, only_input=only_input, default_output=default_output, 
+                         system_prompt=system_prompt, prompt_template=prompt_template, group=group, outputs_logprobs=False, only_input=only_input, default_output=default_output, 
                          speculative_factor=speculative_factor, **kwargs)
         if tokenizer is None:
             self.tokenizer = load_tokenizer(self.model)
@@ -937,7 +1000,7 @@ class ClassifierStrength(RunnableOperator):
         return reshaped_model_outputs_probs
 
     def __str__(self):
-        return f"ClassifierStrength('{self.prompt_string}', model='{self.model}')"
+        return f"ClassifierStrength('{self.system_prompt}', model='{self.get_model_name()}')"
 
     def norm(self, runnable_operator_outputs=None):
         """
