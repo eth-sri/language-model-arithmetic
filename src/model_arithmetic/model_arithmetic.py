@@ -790,7 +790,6 @@ class ModelArithmetic(PreTrainedModel):
                         
         total_done = 0
         while len(current_indices) > 0:
-            print(generated_texts)
             start_time = time.time()
             generated_tokens_batch = [generated_tokens[index] for index in current_indices]
             next_tokens = self.next_token_speculative(generated_tokens_batch, top_p, top_k, 
