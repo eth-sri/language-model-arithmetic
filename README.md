@@ -160,7 +160,9 @@ PERSPECTIVE_API_KEY="[YOUR API KEY]"
 OPENAI_API_KEY="[YOUR API KEY]"
 ```
 
-The processed datasets are in the `data/datasets` folder. You can reproduce our results using these datasets by running 
+You can download the processed datasets we used from [our webpage](https://files.sri.inf.ethz.ch/language-model-arithmetic/). The processed datasets should be placed in the `data/datasets` folder. 
+
+You can reproduce our results using these datasets by running 
 
 ```sh
 bash scripts/main.sh
