@@ -4,4 +4,3 @@ __pycache__/
 finetune/
 eval/
 *.egg-info/
-data/datasets/
