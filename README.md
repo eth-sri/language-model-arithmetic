@@ -65,7 +65,7 @@ formula2 = formula1 + C_formal
 
 # generate text as usual
 ma = ModelArithmetic(formula2, default_model="meta-llama/Llama-2-13b-chat-hf")
-print(ma.generate_text("Write a one-sentence fairy tale.", max_length=128))
+print(ma.generate_text("Write a one-sentence fairy tale.", max_new_tokens=128))
 # -> ['  "Once upon a time, in a magical land filled with fluffy clouds and sparkly rainbows, there was a little girl named me who went on a fun adventure with my stuffed unicorn named Mr. Snuggles!"</s>']
 ```
 
