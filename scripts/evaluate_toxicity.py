@@ -1,5 +1,5 @@
 import torch
-from model_arithmetic import ModelArithmetic, Evaluation, PromptedLLM, enable_logging
+from model_arithmetic import ModelArithmetic, Evaluation, RunnableOperator, enable_logging
 from transformers import set_seed
 import pandas as pd
 from formulas_toxicity import *
@@ -122,9 +122,9 @@ dataset_subset["input"] = dataset_subset["text"].map(lambda x: f"Person 1: {x}\n
 with logger.catch():
     for i, formula in enumerate(formulas):
         if isinstance(formula, tuple):
-            first_model = formula[0].runnable_operators()[0].model
+            first_model = formula[0].get_operators(RunnableOperator)[0].model
         else:
-            first_model = formula.runnable_operators()[0].model
+            first_model = formula.get_operators(RunnableOperator)[0].model
             
         if "Pythia" in first_model:
             first_model = "EleutherAI/Pythia-12b"
