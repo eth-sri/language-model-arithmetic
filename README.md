@@ -144,7 +144,7 @@ Model arithmetic is compatible with the [LM Evaluation harness](https://github.c
 
 ## Reproducing results
 
-For the reproduction of the results presented in our paper, *Controlled Text Generation via Language Model Arithmetic*, we advice to run the code with the exact environment we used (Nvidia H100 80GB GPU on a Linux machine). To do so install [Conda](https://docs.conda.io/projects/miniconda/en/latest/) and run
+For the reproduction of the results presented in our paper, *Controlled Text Generation via Language Model Arithmetic*, we advise to run the code with the exact environment we used (Nvidia H100 80GB GPU on a Linux machine). To do so install [Conda](https://docs.conda.io/projects/miniconda/en/latest/) and run
 
 ```sh
 conda create -n model_arithmetic python=3.10
