@@ -98,7 +98,13 @@ def load_model(dir_or_model, classification=False, token_classification=False, r
             model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=dtype, use_auth_token=True, device_map=device_map)
 
     if is_lora_dir:
-        model = PeftModel.from_pretrained(model, dir_or_model, adapter_name=adapter_name, device_map=device_map)
+        try:
+            model = PeftModel.from_pretrained(model, dir_or_model, adapter_name=adapter_name, device_map=device_map)
+        except:
+            # Sometimes extra tokens are addded during finetuning, so we need to resize the token embeddings of the base model in order to load the tuned model
+            tokenizer = AutoTokenizer.from_pretrained(dir_or_model)
+            model.resize_token_embeddings(len(tokenizer))
+            model = PeftModel.from_pretrained(model, dir_or_model, adapter_name=adapter_name, device_map=device_map)
         
     try:
         tokenizer = load_tokenizer(original_model_name)
