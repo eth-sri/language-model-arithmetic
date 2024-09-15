@@ -277,7 +277,7 @@ class PromptedLLM(RunnableOperator):
                 tokenizer = load_tokenizer(self.model)
             else:
                 tokenizer = load_tokenizer(self.model.name_or_path)
-            self.tokenizer_length = len(tokenizer)
+        self.tokenizer_length = len(tokenizer)
 
     def get_model_name(self):
         if isinstance(self.model, str):
